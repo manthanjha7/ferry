@@ -215,7 +215,7 @@ and reports every assertion by name, with no npm dependencies of its own:
 ```bash
 cd figma-plugin
 npx esbuild test/entry.ts --bundle --outfile=test/fixture/bundle.js --target=es2020 --format=iife
-node test/e2e/harness-headless.mjs        # 175 checks
+node test/e2e/harness-headless.mjs        # 176 checks
 ```
 
 It covers alias resolution, category-aware numeric matching, flex and inferred
@@ -247,7 +247,7 @@ look at.
 ## Status
 
 Both halves are exercised and the plugin runs inside Figma. The extractor is
-covered by 175 browser assertions and the builder by 128 end-to-end assertions
+covered by 176 browser assertions and the builder by 128 end-to-end assertions
 against a mock Figma API, and real Claude Design exports have been imported
 through the real code path, including the multi-screen panel system this was
 built against.

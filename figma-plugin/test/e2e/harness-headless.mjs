@@ -244,6 +244,19 @@ try {
       console.log(`CHECK ${r.ok ? "PASS" : "FAIL"} — ${r.name}${r.ok ? "" : ` :: ${r.detail}`}`);
       if (!r.ok) failures++;
     }
+    // Checks that need a fresh page, because state earlier sections of
+    // harness.html leave behind would mask them. Counted in the same total.
+    const isolated = await runPage(cdp, `${base}/xorigin.html`, "HARNESS DONE");
+    if (isolated.pageError || isolated.timedOut || !isolated.results) {
+      console.log(`CHECK FAIL — xorigin.html :: ${isolated.pageError ?? (isolated.timedOut ? "timed out" : "no results")}`);
+      failures++;
+    } else {
+      for (const r of isolated.results) {
+        console.log(`CHECK ${r.ok ? "PASS" : "FAIL"} — ${r.name}${r.ok ? "" : ` :: ${r.detail}`}`);
+        if (!r.ok) failures++;
+      }
+      suite.results.push(...isolated.results);
+    }
     const passed = suite.results.filter((r) => r.ok).length;
     console.log(`\nHARNESS ${passed}/${suite.results.length} passed`);
   }

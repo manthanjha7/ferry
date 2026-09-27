@@ -1141,7 +1141,7 @@
             load?" is otherwise unanswerable from inside the panel. This stamp
             makes it a glance. build.mjs substitutes it.
           -->
-          <br />build 2026-09-27 21:52:26
+          <br />build 2026-09-27 22:02:28
         </div>
       </div>
     </div>
@@ -3214,7 +3214,14 @@ return Component;`
     flushReveals();
     for (const node of adopted) {
       const sheet = node.sheet;
-      if (sheet) preferReducedMotion(sheet.cssRules);
+      if (!sheet) continue;
+      let rules;
+      try {
+        rules = sheet.cssRules;
+      } catch (e) {
+        continue;
+      }
+      preferReducedMotion(rules);
     }
     for (const animation of document.getAnimations()) {
       const target = (_a = animation.effect) == null ? void 0 : _a.target;
@@ -3235,13 +3242,16 @@ return Component;`
       return;
     }
     for (const rule of list) {
-      const media = rule.media;
-      if (media) {
-        const text = media.mediaText;
-        if (/prefers-reduced-motion\s*:\s*reduce/i.test(text)) media.mediaText = "all";
-        else if (/prefers-reduced-motion\s*:\s*no-preference/i.test(text)) media.mediaText = "not all";
+      try {
+        const media = rule.media;
+        if (media) {
+          const text = media.mediaText;
+          if (/prefers-reduced-motion\s*:\s*reduce/i.test(text)) media.mediaText = "all";
+          else if (/prefers-reduced-motion\s*:\s*no-preference/i.test(text)) media.mediaText = "not all";
+        }
+        preferReducedMotion(rule.cssRules);
+      } catch (e) {
       }
-      preferReducedMotion(rule.cssRules);
     }
   }
   function snapshotHost() {

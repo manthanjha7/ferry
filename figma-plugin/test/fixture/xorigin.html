@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Cross-origin stylesheet check</title>
+  </head>
+  <body>
+    <script src="bundle.js"></script>
+    <script>
+      // Its own page, on purpose. Inside harness.html the same extraction
+      // passed against the broken code: something an earlier section leaves
+      // behind masks it. Here, on a fresh page, the unguarded `cssRules` read
+      // throws exactly what a real import in Figma showed ("Failed to read the
+      // 'cssRules' property"). Every Claude Design export links Google Fonts,
+      // which is cross-origin, so this is not an edge case.
+      const results = [];
+      const check = (name, condition, detail) => results.push({ name, ok: !!condition, detail: detail ?? "" });
+      window.results = results;
+
+      (async () => {
+        const otherHost = location.hostname === "localhost" ? "127.0.0.1" : "localhost";
+        const href = `http://${otherHost}:${location.port}/tokens.css`;
+        const html = (await (await fetch("motion.dc.html")).text()).replace(
+          "<style>",
+          `<link rel="stylesheet" href="${href}" />\n    <style>`,
+        );
+        let error = null;
+        let doc = null;
+        try {
+          doc = await window.extractDocument(html, "Cross-origin sheet", { viewportWidth: 400 });
+        } catch (e) {
+          error = String(e?.message ?? e);
+        }
+        const find = (node, name) =>
+          node?.name === name ? node : (node?.children ?? []).map((c) => find(c, name)).find(Boolean) ?? null;
+        check(
+          "xorigin: a cross-origin stylesheet does not stop the import, and motion still settles",
+          error === null && find(doc?.root, "Entrance")?.opacity === 1,
+          `error=${error}`,
+        );
+        console.log("HARNESS DONE");
+      })();
+    </script>
+  </body>
+</html>

@@ -349,7 +349,16 @@ async function settleMotion(
 
   for (const node of adopted) {
     const sheet = (node as HTMLStyleElement | HTMLLinkElement).sheet;
-    if (sheet) preferReducedMotion(sheet.cssRules);
+    if (!sheet) continue;
+    // `cssRules` itself throws on a cross-origin sheet (Google Fonts, in every
+    // real export), so the read has to be inside the guard, not after it.
+    let rules: CSSRuleList;
+    try {
+      rules = sheet.cssRules;
+    } catch {
+      continue;
+    }
+    preferReducedMotion(rules);
   }
 
   for (const animation of document.getAnimations()) {
@@ -373,13 +382,17 @@ function preferReducedMotion(rules: CSSRuleList | null | undefined): void {
     return; // Cross-origin stylesheet.
   }
   for (const rule of list) {
-    const media = (rule as CSSMediaRule).media;
-    if (media) {
-      const text = media.mediaText;
-      if (/prefers-reduced-motion\s*:\s*reduce/i.test(text)) media.mediaText = "all";
-      else if (/prefers-reduced-motion\s*:\s*no-preference/i.test(text)) media.mediaText = "not all";
+    try {
+      const media = (rule as CSSMediaRule).media;
+      if (media) {
+        const text = media.mediaText;
+        if (/prefers-reduced-motion\s*:\s*reduce/i.test(text)) media.mediaText = "all";
+        else if (/prefers-reduced-motion\s*:\s*no-preference/i.test(text)) media.mediaText = "not all";
+      }
+      preferReducedMotion((rule as CSSGroupingRule).cssRules);
+    } catch {
+      // An @import of a cross-origin sheet throws the same way; skip that branch.
     }
-    preferReducedMotion((rule as CSSGroupingRule).cssRules);
   }
 }
 
