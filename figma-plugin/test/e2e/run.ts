@@ -4400,6 +4400,70 @@ async function scenarioS(ready: boolean): Promise<void> {
  * in for the real capture, which is gitignored, so the builder side of the fix
  * is exercised on every run rather than only when a real export is on disk.
  */
+async function scenarioV(ready: boolean): Promise<void> {
+  const p = "V (fidelity fields reach Figma):";
+  const names = [
+    `${p} a rotated layer is turned by the negated angle about its centre`,
+    `${p} a truncated text keeps its width and cuts at maxLines`,
+    `${p} gradient text is a gradient fill on the text node`,
+    `${p} the font stack lands on the first family Figma has`,
+    `${p} blend mode and a CSS background image reach the frame`,
+  ];
+  if (!ready) {
+    for (const n of names) skip(n, "captured/fixture-screen.json not found");
+    return;
+  }
+
+  const mock = freshMock();
+  const doc = selectFieldDoc();
+  const PNG_8 =
+    "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEklEQVR4nGP4/58BK2IYlRgsEgC1jz/BtRaXFQAAAABJRU5ErkJggg==";
+  const plain = { opacity: 1, clips: false, cornerRadius: { tl: 0, tr: 0, br: 0, bl: 0 }, effects: [], children: [] };
+  const run = { ...(doc.root.children[0].children[0].text!.runs[0]), fontFamily: "No Such Font", fontStack: ["No Such Font", "Roboto", "sans-serif"] };
+  doc.root.children = [
+    { ...plain, kind: "FRAME", name: "Rotated", x: 100, y: 50, width: 100, height: 40, rotation: 12,
+      fills: [{ type: "SOLID", color: { r: 1, g: 0.8, b: 0, a: 1 } }] } as IRNode,
+    { ...plain, kind: "TEXT", name: "Truncated", x: 0, y: 120, width: 120, height: 18, rotation: 0, fills: [],
+      text: { characters: "A long line cut off at the end", runs: [{ ...run, end: 30 }], align: "LEFT", verticalAlign: "TOP",
+        singleLine: true, maxLines: 1,
+        glyphFill: { type: "GRADIENT_LINEAR", angle: 90, stops: [
+          { position: 0, color: { r: 1, g: 0, b: 0, a: 1 } }, { position: 1, color: { r: 0, g: 0, b: 1, a: 1 } }] } } } as IRNode,
+    { ...plain, kind: "FRAME", name: "Blended", x: 0, y: 160, width: 64, height: 64, rotation: 0, blendMode: "multiply",
+      fills: [{ type: "IMAGE", bytesBase64: PNG_8, scaleMode: "FILL" }] } as IRNode,
+  ];
+
+  const result = await buildDocument(doc, { kind: "none" }, () => {});
+  const tree = mock.serializeTree(result.root);
+  const find = (name: string) => tree.children.find((c: any) => c.name === name);
+  const rotated = find("Rotated");
+  check(
+    names[0],
+    rotated?.rotation === -12 && Math.abs(rotated.x - 105.25) < 0.1 && Math.abs(rotated.y - 40.04) < 0.1,
+    `rot=${rotated?.rotation} x=${rotated?.x} y=${rotated?.y}`,
+  );
+  const raw = mock.getRootNodes()[0];
+  const findRaw = (node: any, name: string): any =>
+    node.name === name ? node : (node.children ?? []).map((c: any) => findRaw(c, name)).find(Boolean) ?? null;
+  const cut = findRaw(raw, "Truncated");
+  check(
+    names[1],
+    cut?.textTruncation === "ENDING" && cut?.maxLines === 1 && cut?.textAutoResize === "HEIGHT" && cut?.width === 120,
+    `trunc=${cut?.textTruncation} lines=${cut?.maxLines} resize=${cut?.textAutoResize} w=${cut?.width}`,
+  );
+  check(names[2], cut?.fills?.[0]?.type === "GRADIENT_LINEAR", JSON.stringify(cut?.fills?.[0]?.type));
+  check(
+    names[3],
+    cut?.fontName?.family === "Roboto" && result.substitutions.some((s: string) => s.includes("No Such Font → Roboto")),
+    `font=${JSON.stringify(cut?.fontName)} subs=${JSON.stringify(result.substitutions)}`,
+  );
+  const blended = findRaw(raw, "Blended");
+  check(
+    names[4],
+    blended?.blendMode === "MULTIPLY" && blended?.fills?.[0]?.type === "IMAGE" && !!blended?.fills?.[0]?.imageHash,
+    `blend=${blended?.blendMode} fill=${JSON.stringify(blended?.fills?.[0])}`,
+  );
+}
+
 async function scenarioU(ready: boolean): Promise<void> {
   const p = "U (a listed font that refuses to load):";
   const names = [
@@ -4724,6 +4788,11 @@ async function main(): Promise<void> {
     await scenarioU(fixtureReady);
   } catch (err) {
     failScenario("U", err);
+  }
+  try {
+    await scenarioV(fixtureReady);
+  } catch (err) {
+    failScenario("V", err);
   }
 
   if (scenarioAOut) {

@@ -129,11 +129,30 @@ export async function createFontResolver(
     return fallback;
   };
 
+  // A whole `font-family` stack: the first family Figma has, or the first
+  // generic it can answer for, in the author's order.
+  const resolveStack = (family: string, weight: number, italic: boolean): FontName => {
+    if (!family.includes(",")) return resolve(family, weight, italic);
+    const parts = family
+      .split(",")
+      .map((part) => part.trim().replace(/^['"]|['"]$/g, ""))
+      .filter(Boolean);
+    for (const part of parts) {
+      const lower = part.toLowerCase();
+      if (families.has(lower) || FAMILY_FALLBACKS[lower]) {
+        const font = resolve(part, weight, italic);
+        if (part !== parts[0]) substitutions.add(`${parts[0]} → ${font.family}`);
+        return font;
+      }
+    }
+    return resolve(parts[0] ?? "Inter", weight, italic);
+  };
+
   // Pre-load every pair the document will need. A missing preload surfaces as
   // an exception deep inside text building, so paying for it here is cheaper.
   const needed = new Map<string, FontName>();
   for (const request of requests) {
-    const font = resolve(request.family, request.weight, request.italic);
+    const font = resolveStack(request.family, request.weight, request.italic);
     needed.set(`${font.family}|${font.style}`, font);
   }
 
@@ -161,7 +180,7 @@ export async function createFontResolver(
   // on the first `fontName =`, outside any handler, and took the whole screen
   // down over one label.
   const safeResolve: FontResolver["resolve"] = (family, weight, italic) => {
-    const font = resolve(family, weight, italic);
+    const font = resolveStack(family, weight, italic);
     return failed.has(`${font.family}|${font.style}`) ? { family: "Inter", style: "Regular" } : font;
   };
 

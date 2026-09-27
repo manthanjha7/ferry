@@ -27,6 +27,13 @@
   .pop { animation: pop .4s ease-out 2s backwards; width: 80px; height: 30px; background: #9c6; }
   .sticky { position: sticky; top: 0; background: #ddd; }
   .fixed { position: fixed; bottom: 0; right: 0; width: 80px; height: 30px; background: #f0f; }
+  .avatar { width: 200px; height: 200px; border-radius: 50%; background: #369; }
+  .blurred { width: 60px; height: 20px; background: #c33; filter: blur(4px); }
+  .shadowed { text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5); }
+  .blend { width: 60px; height: 20px; background: #3c3; mix-blend-mode: multiply; }
+  .bg-image { width: 64px; height: 64px; background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEklEQVR4nGP438CAFWEXHbQSAKmzX8FBxi1QAAAAAElFTkSuQmCC"); background-size: cover; }
+  .icon { color: rgb(200, 30, 90); }
+  .stacked-font { font-family: "No Such Font", "Roboto", sans-serif; }
 </style>
 </head>
 <body>
@@ -47,6 +54,14 @@
   <div data-name="Fixed" class="fixed"></div>
   <canvas data-name="Chart canvas" width="200" height="80"></canvas>
   <img data-name="Lazy image" loading="lazy" width="40" height="40" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40'><rect width='40' height='40' fill='orange'/></svg>" />
+  <div data-name="Avatar" class="avatar"></div>
+  <div data-name="Blurred" class="blurred"></div>
+  <p data-name="Shadowed" class="shadowed">Shadowed words</p>
+  <div data-name="Blend" class="blend"></div>
+  <div data-name="Bg image" class="bg-image"></div>
+  <img data-name="Cover image" alt="Cover image" width="80" height="40" style="object-fit: cover" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEklEQVR4nGP438CAFWEXHbQSAKmzX8FBxi1QAAAAAElFTkSuQmCC" />
+  <svg data-name="Icon" class="icon" aria-label="Icon" width="16" height="16" viewBox="0 0 16 16"><path d="M2 2h12v12H2z" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+  <p data-name="Stacked font" class="stacked-font">Font stack</p>
   <div data-name="Counter" id="counter">0</div>
   <div data-name="Typewriter" id="typer"></div>
 </body>

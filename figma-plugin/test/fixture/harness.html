@@ -1018,6 +1018,106 @@
           `ready=${document.documentElement.hasAttribute("data-mx-ready")}`,
         );
 
+        // --- Stress page (test/fixture/stress.html) -----------------------------
+        // One page holding every pattern the failure catalogue found breaking
+        // an import. The page is measured inside the plugin's own small window,
+        // so each check is about what the DESIGN looks like at 1440, not that
+        // window.
+        const stress = await window.extractDocument(
+          await (await fetch("stress.html")).text(),
+          "Stress",
+          { viewportWidth: 1440 },
+        );
+        const byText = (node, chars) =>
+          node.kind === "TEXT" && node.text?.characters === chars
+            ? node
+            : (node.children || []).map((c) => byText(c, chars)).find(Boolean) || null;
+        const sn = (name) => findByName(stress.root, name);
+        check(
+          "viewport units resolve for the design width: 5vw at 1440 is 72px, 100vh is 900",
+          byText(stress.root, "Viewport sized")?.text?.runs?.[0]?.fontSize === 72 && sn("Hero 100vh")?.height === 900,
+          `size=${byText(stress.root, "Viewport sized")?.text?.runs?.[0]?.fontSize} hero=${sn("Hero 100vh")?.height}`,
+        );
+        check(
+          "media queries answer for the design width, so the desktop rule applies, not the mobile one",
+          JSON.stringify(sn("Responsive")?.fills?.[0]?.color) === JSON.stringify({ r: 0, g: 128 / 255, b: 0, a: 1 }),
+          JSON.stringify(sn("Responsive")?.fills?.[0]),
+        );
+        check(
+          "::before content and a ::after rule become real layers",
+          !!byText(stress.root, "\u2605") && sn("Pseudo")?.children?.some((c) => c.name === "::after" && c.height === 4),
+          JSON.stringify(sn("Pseudo")?.children?.map((c) => c.name)),
+        );
+        check(
+          "a rotated box keeps its upright size and carries the angle",
+          sn("Rotated")?.rotation === 12 && sn("Rotated")?.width === 100 && sn("Rotated")?.height === 40,
+          `rot=${sn("Rotated")?.rotation} ${sn("Rotated")?.width}x${sn("Rotated")?.height}`,
+        );
+        const clipText = byText(stress.root, "Gradient text");
+        check(
+          "gradient text puts the gradient on the glyphs, with no block behind them",
+          clipText?.text?.glyphFill?.type === "GRADIENT_LINEAR" && (clipText?.fills ?? []).length === 0,
+          JSON.stringify({ glyph: clipText?.text?.glyphFill?.type, fills: clipText?.fills }),
+        );
+        check(
+          "z-index decides which layer is on top, not DOM order",
+          JSON.stringify(sn("Stack")?.children?.map((c) => c.name)) === JSON.stringify(["Under B", "Top A"]),
+          JSON.stringify(sn("Stack")?.children?.map((c) => c.name)),
+        );
+        check(
+          "ellipsis and line-clamp become truncation at 1 and 2 lines",
+          byText(stress.root, "This is a long line that should be truncated")?.text?.maxLines === 1 &&
+            byText(stress.root, "Line one of text that wraps. Line two continues here. Line three should be hidden entirely.")?.text?.maxLines === 2,
+        );
+        const images = [];
+        (function collectImages(n) {
+          if (n.kind === "IMAGE") images.push(n);
+          (n.children || []).forEach(collectImages);
+        })(stress.root);
+        check(
+          "a canvas, an SVG image and a lazy image all import as pictures, with no read failures",
+          images.some((n) => n.name === "Canvas") &&
+            images.some((n) => n.name === "Lazy image" || /svg/.test(n.name)) &&
+            !stress.warnings.some((w) => w.startsWith("Could not read image")),
+          `images=${JSON.stringify(images.map((n) => n.name))} warnings=${JSON.stringify(stress.warnings)}`,
+        );
+        check(
+          "a 50% radius on a 200px box is a circle (100), not a rounded square (50)",
+          sn("Avatar")?.cornerRadius?.tl === 100,
+          JSON.stringify(sn("Avatar")?.cornerRadius),
+        );
+        check(
+          "CSS blur comes in at Figma's scale, twice the CSS number",
+          sn("Blurred")?.effects?.some((e) => e.type === "LAYER_BLUR" && e.radius === 8),
+          JSON.stringify(sn("Blurred")?.effects),
+        );
+        check(
+          "text-shadow becomes a drop shadow on the text layer",
+          byText(stress.root, "Shadowed words")?.effects?.some((e) => e.type === "DROP_SHADOW" && e.offsetY === 2),
+          JSON.stringify(byText(stress.root, "Shadowed words")?.effects),
+        );
+        check(
+          "mix-blend-mode and object-fit are carried",
+          sn("Blend")?.blendMode === "multiply" && images.find((n) => n.name === "Cover image")?.imageScale === "FILL",
+          `blend=${sn("Blend")?.blendMode} fit=${images.find((n) => n.name === "Cover image")?.imageScale}`,
+        );
+        check(
+          "a CSS background image imports as an image fill",
+          sn("Bg image")?.fills?.some((f) => f.type === "IMAGE" && f.bytesBase64.length > 20 && f.scaleMode === "FILL"),
+          JSON.stringify(sn("Bg image")?.fills?.map((f) => f.type)),
+        );
+        const icon = (function find(n) { return n.kind === "VECTOR" && n.name === "Icon" ? n : (n.children || []).map(find).find(Boolean) || null; })(stress.root);
+        check(
+          "a currentColor icon carries its real colour, not black",
+          !!icon && !/currentColor/i.test(icon.svg) && /rgb\(200, 30, 90\)/.test(icon.svg),
+          icon?.svg?.slice(0, 200),
+        );
+        check(
+          "the whole font-family stack travels, in order",
+          JSON.stringify(byText(stress.root, "Font stack")?.text?.runs?.[0]?.fontStack) === JSON.stringify(["No Such Font", "Roboto", "sans-serif"]),
+          JSON.stringify(byText(stress.root, "Font stack")?.text?.runs?.[0]?.fontStack),
+        );
+
         // --- Two screens of one export that disagree (divergent-a/b.html) ------
         // The premise the sandbox half of this story rests on, measured rather
         // than assumed: two Claude Design documents can declare one token name

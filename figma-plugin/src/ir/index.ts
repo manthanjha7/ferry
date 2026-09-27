@@ -114,6 +114,12 @@ export type IRTextRun = {
   start: number;
   end: number;
   fontFamily: string;
+  /**
+   * The whole `font-family` stack, in order. Figma is asked for each in turn,
+   * so `Geist, "Inter", sans-serif` lands on Inter where Geist is missing
+   * rather than on a generic last resort.
+   */
+  fontStack?: string[];
   fontWeight: number;
   italic: boolean;
   fontSize: number;
@@ -205,6 +211,10 @@ export type IRNode = {
    * more bytes across the boundary for nothing.
    */
   imageBytes?: Uint8Array;
+  /** How an IMAGE node's picture fits its box, from `object-fit`. Absent = stretch to fill. */
+  imageScale?: "FILL" | "FIT" | "CROP";
+  /** `mix-blend-mode`, as Figma's blend mode name. Absent = normal. */
+  blendMode?: string;
   /** For VECTOR nodes: raw SVG markup. */
   svg?: string;
 

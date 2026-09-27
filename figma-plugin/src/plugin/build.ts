@@ -771,7 +771,7 @@ function collectFontRequests(
   if (node.text) {
     for (const run of node.text.runs) {
       out.push({
-        family: run.fontFamily,
+        family: run.fontStack?.length ? run.fontStack.join(",") : run.fontFamily,
         weight: run.fontWeight,
         italic: run.italic,
       });
@@ -1111,7 +1111,7 @@ async function buildText(node: IRNode, ctx: BuildCtx): Promise<TextNode | null> 
   // The default font has to be loaded and assigned before `characters`,
   // otherwise Figma throws on unloaded-font mutation.
   const baseFont = first
-    ? ctx.fonts.resolve(first.fontFamily, first.fontWeight, first.italic)
+    ? ctx.fonts.resolve(first.fontStack?.length ? first.fontStack.join(",") : first.fontFamily, first.fontWeight, first.italic)
     : { family: "Inter", style: "Regular" };
   try {
     text.fontName = baseFont;
@@ -1169,6 +1169,7 @@ async function buildText(node: IRNode, ctx: BuildCtx): Promise<TextNode | null> 
   }
 
   applyEffects(text, node);
+  applyBlend(text, node);
   return text;
 }
 
@@ -1179,7 +1180,7 @@ function applyRun(
   run: IRTextRun,
   ctx: BuildCtx,
 ): void {
-  const font = ctx.fonts.resolve(run.fontFamily, run.fontWeight, run.italic);
+  const font = ctx.fonts.resolve(run.fontStack?.length ? run.fontStack.join(",") : run.fontFamily, run.fontWeight, run.italic);
 
   try {
     text.setRangeFontName(start, end, font);
@@ -1228,7 +1229,15 @@ async function buildImage(node: IRNode, ctx: BuildCtx): Promise<SceneNode | null
     rect.name = node.name;
     rect.resize(Math.max(node.width, 0.01), Math.max(node.height, 0.01));
     rect.opacity = node.opacity;
-    rect.fills = [{ type: "IMAGE", imageHash: image.hash, scaleMode: "FILL" }];
+    // CSS `object-fit` defaults to `fill`, which stretches: Figma's CROP with
+    // an identity transform. `cover` is Figma's FILL, `contain` its FIT.
+    const scale = node.imageScale ?? "CROP";
+    rect.fills = [
+      scale === "CROP"
+        ? { type: "IMAGE", imageHash: image.hash, scaleMode: "CROP", imageTransform: [[1, 0, 0], [0, 1, 0]] }
+        : { type: "IMAGE", imageHash: image.hash, scaleMode: scale },
+    ];
+    applyBlend(rect, node);
     applyCorners(rect, node, ctx);
     applyEffects(rect, node);
     return rect;
@@ -1280,6 +1289,7 @@ async function buildVector(node: IRNode, ctx: BuildCtx): Promise<SceneNode | nul
 // ---------------------------------------------------------------------------
 
 function applyFills(node: FrameNode, ir: IRNode, ctx: BuildCtx): void {
+  applyBlend(node, ir);
   if (ir.fills.length === 0) {
     node.fills = [];
     return;
@@ -1299,6 +1309,15 @@ function toFigmaPaint(paint: IRPaint, ctx: BuildCtx): Paint | null {
     return bindPaint(solid, bindableToken(paint.token, ctx), ctx.registry);
   }
 
+  if (paint.type === "IMAGE") {
+    try {
+      const image = figma.createImage(figma.base64Decode(paint.bytesBase64));
+      return { type: "IMAGE", imageHash: image.hash, scaleMode: paint.scaleMode };
+    } catch {
+      return null;
+    }
+  }
+
   if (paint.type === "GRADIENT_LINEAR") {
     return {
       type: "GRADIENT_LINEAR",
@@ -1311,6 +1330,24 @@ function toFigmaPaint(paint: IRPaint, ctx: BuildCtx): Paint | null {
   }
 
   return null;
+}
+
+const BLEND_MODES: Record<string, BlendMode> = {
+  multiply: "MULTIPLY", screen: "SCREEN", overlay: "OVERLAY", darken: "DARKEN",
+  lighten: "LIGHTEN", "color-dodge": "COLOR_DODGE", "color-burn": "COLOR_BURN",
+  "hard-light": "HARD_LIGHT", "soft-light": "SOFT_LIGHT", difference: "DIFFERENCE",
+  exclusion: "EXCLUSION", hue: "HUE", saturation: "SATURATION", color: "COLOR",
+  luminosity: "LUMINOSITY", "plus-lighter": "LINEAR_DODGE",
+};
+
+function applyBlend(node: SceneNode, ir: IRNode): void {
+  const mode = ir.blendMode ? BLEND_MODES[ir.blendMode] : undefined;
+  if (!mode) return;
+  try {
+    (node as SceneNode & { blendMode: BlendMode }).blendMode = mode;
+  } catch {
+    // A node type without blending keeps NORMAL.
+  }
 }
 
 /**

@@ -1165,6 +1165,8 @@ export async function extractDocument(
       pendingLineHeights: [],
     };
 
+    await prefetchBackgroundImages(handle.root, ctx);
+
     const children: IRNode[] = [];
     const deckSlides = detectDeckSlides(handle.root);
     if (deckSlides) {
@@ -1748,7 +1750,9 @@ async function walkElement(
   const rotatedRect = turn !== 0 ? el.getBoundingClientRect() : null;
   const restoreTransform = turn !== 0 ? suspendTransform(el) : null;
   try {
-    return await walkMeasured(el, parent, ctx, style, turn, rotatedRect);
+    const node = await walkMeasured(el, parent, ctx, style, turn, rotatedRect);
+    if (node && style.mixBlendMode && style.mixBlendMode !== "normal") node.blendMode = style.mixBlendMode;
+    return node;
   } finally {
     restoreTransform?.();
   }
@@ -1817,9 +1821,11 @@ async function walkMeasured(
       ctx.warnings.push(`Could not read image: ${(el as HTMLImageElement).alt || (el as HTMLImageElement).src}`);
       return null;
     }
+    const fit = style.objectFit;
     return {
       kind: "IMAGE",
       name: (el as HTMLImageElement).alt || fileName((el as HTMLImageElement).src) || "Image",
+      imageScale: fit === "cover" ? "FILL" : fit === "contain" || fit === "scale-down" || fit === "none" ? "FIT" : "CROP",
       ...base,
       fills: [],
       cornerRadius: cornerRadii(style),
@@ -1886,7 +1892,7 @@ async function walkMeasured(
           ...base,
           fills: [],
           cornerRadius: { tl: 0, tr: 0, br: 0, bl: 0 },
-          effects: shadows,
+          effects: [...shadows, ...textShadows(style)],
           text,
           children: [],
         };
@@ -1921,7 +1927,7 @@ async function walkMeasured(
         },
         fills: [],
         cornerRadius: { tl: 0, tr: 0, br: 0, bl: 0 },
-        effects: [],
+        effects: textShadows(style),
         text,
         children: [],
       };
@@ -2843,6 +2849,7 @@ function makeRun(
     start,
     end,
     fontFamily: primaryFamily(style.fontFamily),
+    fontStack: fontStackOf(style.fontFamily),
     fontWeight: parseWeight(style.fontWeight),
     italic: style.fontStyle === "italic" || style.fontStyle === "oblique",
     fontSize: px(style.fontSize),
@@ -2870,6 +2877,13 @@ function makeRun(
   }
 
   return run;
+}
+
+function fontStackOf(stack: string): string[] {
+  return stack
+    .split(",")
+    .map((part) => part.trim().replace(/^['"]|['"]$/g, ""))
+    .filter(Boolean);
 }
 
 function primaryFamily(stack: string): string {
@@ -3018,7 +3032,18 @@ function backgroundPaints(
       // 1px` grown on hover. Painting it filled every nav link with a solid
       // block of its text colour.
     } else if (image.startsWith("url(")) {
-      // Resolved asynchronously would complicate the walk; note it instead.
+      const src = cssUrl(image);
+      const bytes = src ? ctx.imageCache.get(src) : null;
+      if (bytes) {
+        const size = (splitTopLevel(style.backgroundSize || "auto")[0] ?? "auto").trim();
+        const repeat = (splitTopLevel(style.backgroundRepeat || "repeat")[0] ?? "repeat").trim();
+        paints.push({
+          type: "IMAGE",
+          bytesBase64: toBase64(bytes),
+          scaleMode: size === "contain" ? "FIT" : size === "cover" || /no-repeat/.test(repeat) ? "FILL" : "TILE",
+        });
+        return paints;
+      }
       ctx.warnings.push(
         `CSS background image on <${el.tagName.toLowerCase()}> was not imported (use an <img> for it to come across).`,
       );
@@ -3026,6 +3051,38 @@ function backgroundPaints(
   }
 
   return paints;
+}
+
+/** The first `url(...)` in a background-image value. */
+function cssUrl(value: string): string | null {
+  const m = /url\(\s*(['"]?)(.*?)\1\s*\)/.exec(value);
+  return m ? m[2] : null;
+}
+
+function toBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(binary);
+}
+
+/**
+ * Load every CSS background image before the walk, which reads them
+ * synchronously. SVG backgrounds are rasterised, same as `<img>`.
+ */
+async function prefetchBackgroundImages(root: HTMLElement, ctx: Ctx): Promise<void> {
+  const seen = new Set<string>();
+  for (const el of [root, ...Array.from(root.querySelectorAll<HTMLElement>("*"))]) {
+    const value = getComputedStyle(el).backgroundImage;
+    if (!value || !value.includes("url(")) continue;
+    const src = cssUrl(value);
+    if (!src || seen.has(src)) continue;
+    seen.add(src);
+    const rect = el.getBoundingClientRect();
+    const bytes = (await loadImage(src, ctx)) ?? (await rasteriseSvg(src, rect.width, rect.height));
+    ctx.imageCache.set(src, bytes);
+  }
 }
 
 function parseLinearGradient(value: string): IRPaint | null {
@@ -3148,11 +3205,27 @@ function borderWeight(
 }
 
 function cornerRadii(style: CSSStyleDeclaration) {
+  // A percentage radius stays a percentage in computed style, and `px("50%")`
+  // read it as 50: an avatar over 100px came in as a rounded square instead of
+  // a circle. CSS takes the horizontal percentage of the width and the
+  // vertical of the height; a Figma corner is circular, so the smaller side.
+  const box = Math.min(
+    parseFloat(style.width) + parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) + parseFloat(style.borderLeftWidth) + parseFloat(style.borderRightWidth),
+    parseFloat(style.height) + parseFloat(style.paddingTop) + parseFloat(style.paddingBottom) + parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth),
+  );
+  const radius = (value: string): number => {
+    const first = value.trim().split(/\s+/)[0] ?? "0";
+    if (first.endsWith("%")) {
+      const r = (parseFloat(first) / 100) * (Number.isFinite(box) ? box : 0);
+      return Math.min(r, (Number.isFinite(box) ? box : r) / 2);
+    }
+    return px(first);
+  };
   return {
-    tl: px(style.borderTopLeftRadius),
-    tr: px(style.borderTopRightRadius),
-    br: px(style.borderBottomRightRadius),
-    bl: px(style.borderBottomLeftRadius),
+    tl: radius(style.borderTopLeftRadius),
+    tr: radius(style.borderTopRightRadius),
+    br: radius(style.borderBottomRightRadius),
+    bl: radius(style.borderBottomLeftRadius),
   };
 }
 
@@ -3209,15 +3282,29 @@ function effects(style: CSSStyleDeclaration, ctx: Ctx): IREffect[] {
   const backdrop = style.backdropFilter || (style as unknown as Record<string, string>).webkitBackdropFilter;
   if (backdrop && backdrop !== "none") {
     const blur = backdrop.match(/blur\(([\d.]+)px\)/);
-    if (blur) out.push({ type: "BACKGROUND_BLUR", radius: parseFloat(blur[1]) });
+    // CSS blur() is a Gaussian's standard deviation; Figma's blur radius is
+    // about twice that, so the CSS number came in half as soft.
+    if (blur) out.push({ type: "BACKGROUND_BLUR", radius: parseFloat(blur[1]) * 2 });
   }
 
   if (style.filter && style.filter !== "none") {
     const blur = style.filter.match(/blur\(([\d.]+)px\)/);
-    if (blur) out.push({ type: "LAYER_BLUR", radius: parseFloat(blur[1]) });
+    if (blur) out.push({ type: "LAYER_BLUR", radius: parseFloat(blur[1]) * 2 });
   }
 
   void ctx;
+  return out;
+}
+
+/** `text-shadow`, as drop shadows on the text layer (no spread in CSS). */
+function textShadows(style: CSSStyleDeclaration): IREffect[] {
+  const value = style.textShadow;
+  if (!value || value === "none") return [];
+  const out: IREffect[] = [];
+  for (const part of splitTopLevel(value)) {
+    const shadow = parseShadow(part.trim());
+    if (shadow && shadow.type === "DROP_SHADOW") out.push({ ...shadow, spread: 0 });
+  }
   return out;
 }
 
