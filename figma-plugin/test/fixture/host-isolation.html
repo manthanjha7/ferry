@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Host-page isolation fixture</title>
+    <!--
+      A document that collides with the panel on purpose.
+
+      The panel's own stylesheet is loaded into the page that measures this
+      (mountDocument, src/ui/extract.ts, renders into the plugin's own document
+      because a nested iframe would have an opaque origin and be unreadable), so
+      anything it declares that can match here does. Every class, id and custom
+      property below is one the panel also uses -- which is not a contrived
+      coincidence: the real export this plugin was built against is a design OF
+      the panel, and it carries `cd2f-header`, `cd2f-root` and the bare panel
+      ids throughout.
+
+      Nothing here declares `display` on the header, exactly as the real export
+      does not: it sets the flex properties and the padding inline and lets the
+      default block flow stack the two lines. `.cd2f-header { display: flex }`
+      from the panel is enough to turn that into a row.
+    -->
+    <style>
+      /* The document's own layer, which must keep applying. */
+      .iso-authored {
+        background: #eceded;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      class="cd2f-root"
+      id="cd2f-app"
+      data-name="Panel"
+      style="width: 400px; background: #ffffff"
+    >
+      <!-- Two stacked lines. A row here is the bug. -->
+      <div
+        class="cd2f-header"
+        data-name="Header"
+        style="align-items: flex-start; gap: 9px; padding: 13px 14px 12px"
+      >
+        <div class="cd2f-title" data-name="Title" style="font-size: 30px; line-height: 36px">
+          Portage
+        </div>
+        <div class="cd2f-subtitle" data-name="Subtitle" style="font-size: 11px; line-height: 15px">
+          Import Claude Design screens
+        </div>
+      </div>
+
+      <!-- The panel gives its own body `overflow-y: auto` and its children
+           `flex: 0 0 auto !important`; this one is a plain block column. -->
+      <div class="cd2f-body" data-name="Body">
+        <div
+          class="cd2f-section iso-authored"
+          data-name="Section"
+          style="padding: 20px; height: 80px"
+        ></div>
+
+        <!-- The panel caps its summary at 91px and scrolls it. -->
+        <div class="cd2f-summary" data-name="Summary" style="height: 140px"></div>
+
+        <!--
+          Outside any theme block on purpose. The panel declares the whole
+          `--figma-color-*` set as a fallback for a plain browser, and if it
+          declares it anywhere above the mount container this resolves to the
+          panel's #1e1e1e instead of this document's own magenta.
+        -->
+        <div
+          data-name="Token colour"
+          style="height: 24px; background: var(--figma-color-text, #ff00ff)"
+        ></div>
+      </div>
+    </div>
+  </body>
+</html>

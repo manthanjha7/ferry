@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+  </head>
+  <body>
+    <x-dc>
+      <helmet>
+        <!--
+          Synthetic fixture for the imported frame's background.
+
+          Shaped like a real Claude Design export: the canvas colour is declared
+          by a `body { }` rule inside the document's own <helmet>, through a
+          custom property, so reading it back exercises both halves of the
+          problem — finding the document's own rule when the document's body and
+          the host page's body are the same element, and resolving a var() the
+          way the engine did.
+
+          The harness paints the HOST page a colour that appears nowhere in this
+          file before it extracts, which is what the plugin's own
+          `html, body { background: var(--figma-color-bg) !important }` does in
+          production. The imported frame must come back #ECEDED regardless.
+        -->
+        <style>
+          :root {
+            --dv-canvas: #eceded;
+            --dv-card: #ffffff;
+          }
+          body {
+            margin: 0;
+            background: var(--dv-canvas);
+          }
+        </style>
+      </helmet>
+      <div
+        data-name="Card"
+        style="
+          margin: 24px;
+          padding: 16px;
+          width: 200px;
+          background: var(--dv-card);
+          font: 12px/1.5 Helvetica, Arial, sans-serif;
+        "
+      >
+        On the canvas
+      </div>
+    </x-dc>
+  </body>
+</html>

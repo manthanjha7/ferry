@@ -1,0 +1,7 @@
+:root {
+  --acme-green-500: #1b6f58;
+  --acme-green-700: #0a2920;
+  --acme-grey-100: #eceded;
+  --color-surface: var(--acme-grey-100);
+  --color-accent: var(--acme-green-500);
+}

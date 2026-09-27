@@ -1,0 +1,26 @@
+/* =========================================================
+   Iso design system - webfonts
+
+   The reference below is written the way the real export writes it: relative,
+   and relative to THIS FILE rather than to the document that links it. From
+   _ds/<system>/tokens/ that means _ds/<system>/fonts/iso-text.ttf. There is a
+   second iso-text.ttf sitting at fonts/iso-text.ttf, which is where the same
+   string points if it is resolved against the document instead, and it has
+   half the advance width - so which one arrives is a number the harness can
+   measure rather than a claim.
+   ========================================================= */
+
+@font-face {
+  font-family: "Iso Text";
+  font-style: normal;
+  font-weight: 400;
+  src: url("../fonts/iso-text.ttf") format("truetype");
+}
+
+/* A src LIST, unquoted, with an entry that can never load: every url() in it
+   has to be rewritten independently and the absolute one left alone. */
+@font-face {
+  font-family: "Iso Text Alt";
+  src: url(../fonts/iso-text.ttf) format("truetype"),
+    url("https://example.invalid/iso-text.woff2") format("woff2");
+}

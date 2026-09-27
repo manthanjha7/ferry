@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet>
+        <!--
+          Theme is a CSS custom property switched by a class the markup builds
+          out of a prop, which is how the real Portage export does it
+          (`class="cd2f-root cd2f-theme-{{ theme }}"`). A fixture that instead
+          wrote a literal hex straight out of renderVals() would prove far less:
+          the colour has to travel prop -> class -> cascade -> resolved fill,
+          because that is the whole distance a broken prop merge silently
+          collapses.
+
+          The var() fallback is magenta, a colour neither theme uses. If the
+          helmet hoist ever stops working, the theme assertions fail on the
+          spot instead of passing because the fallback happened to match light.
+        -->
+        <style>
+          .smx-root {
+            --smx-surface: #ffffff;
+            --smx-ink: #1e1e1e;
+          }
+          .smx-root.smx-theme-dark {
+            --smx-surface: #1e1e1e;
+            --smx-ink: #ffffff;
+          }
+        </style>
+      </helmet>
+      <div
+        class="smx-root smx-theme-{{ theme }}"
+        data-name="State surface"
+        style="
+          box-sizing: border-box;
+          width: 320px;
+          padding: 16px;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          background: var(--smx-surface, #ff00ff);
+          color: var(--smx-ink, #ff00ff);
+          font: 12px/16px monospace;
+        "
+      >
+        <!--
+          Each probe carries a background of its own so it extracts as a FRAME
+          named from `data-name` with the resolved text as its one child, the
+          same trick test/fixture/props.html uses. An undecorated <div> becomes
+          a bare TEXT node named after its own characters, so the node name and
+          the string under test would be the same value and a wrong value would
+          be indistinguishable from a missing node.
+        -->
+        <div data-name="Status" style="background: #eeeeee">{{ statusText }}</div>
+        <div data-name="Detail" style="background: #eeeeee">{{ detailText }}</div>
+      </div>
+    </x-dc>
+    <!--
+      The schema is shaped like the Portage panel's: two enum props worth
+      enumerating, an int and an untyped one that are not. Height is left off
+      the surface so the box measures shorter than the declared $preview, which
+      is what makes the preview floor observable.
+    -->
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{"$preview":{"width":320,"height":200},"state":{"editor":"enum","options":["empty","ready","done"],"default":"empty","tsType":"&apos;empty&apos;|&apos;ready&apos;|&apos;done&apos;"},"theme":{"editor":"enum","options":["light","dark"],"default":"light","tsType":"&apos;light&apos;|&apos;dark&apos;"},"width":{"editor":"int","default":1440,"min":320,"max":4096,"tsType":"number"},"sfx":{"editor":null,"default":"","tsType":"string"}}'
+    >
+      class Component extends DCLogic {
+        // `theme` deliberately shadows the prop of the same name, because the
+        // Portage panel does the same thing and the resolver's merge order
+        // (state, then props, then renderVals) is the only reason dark panels
+        // are not all light. Holding it here means a merge-order regression
+        // shows up as a light frame named theme=dark.
+        state = { theme: "light" };
+
+        renderVals() {
+          const s = this.props.state || "empty";
+          const status = {
+            empty: "No file loaded.",
+            ready: "homepage.html ready.",
+            done: "Imported.",
+          };
+          const detail = {
+            empty: "Drop a file to begin.",
+            ready: "42 layers to create.",
+            done: "42 layers created.",
+          };
+          return {
+            theme: this.props.theme === "dark" ? "dark" : "light",
+            statusText: status[s],
+            detailText: detail[s],
+          };
+        }
+      }
+    </script>
+  </body>
+</html>

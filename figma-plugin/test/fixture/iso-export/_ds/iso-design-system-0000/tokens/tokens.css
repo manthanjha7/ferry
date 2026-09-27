@@ -1,0 +1,54 @@
+/* =========================================================
+   Iso design system - tokens
+
+   Shaped like the real thing: a token file that is NOT only tokens. The real
+   export's tokens/typography.css declares the type scale as custom properties
+   and then goes on to set `body { line-height: 1.5 }` and a page of utility
+   classes, which is why "everything under tokens/ is safe to inject" was
+   false. Only the custom properties below may reach a document being
+   measured; every ordinary rule here is a trap.
+   ========================================================= */
+
+:root {
+  --iso-pad: 12px;
+  --iso-ink: #1b6f58;
+  --iso-gap: 8px;
+}
+
+/* Inherited into the mount container, and worth 3x the line height and 2.5x
+   the font size of anything the document did not style itself. */
+body {
+  line-height: 3;
+  font-size: 40px;
+}
+
+/*
+   A direct class hit: the document has an .iso-card and did not ask for any of
+   this. The properties are ones the document never sets ITSELF, which is what
+   makes the trap a real one: extraCss is inserted ahead of the document's own
+   stylesheets so that the document still wins the cascade, and an inline style
+   outranks both, so a rule that fights over `padding` here would lose and prove
+   nothing.
+*/
+.iso-card {
+  border-top: 30px solid #cc2222;
+  min-height: 300px;
+}
+
+@media (min-width: 1px) {
+  :root {
+    --iso-alt: #654321;
+  }
+
+  .iso-card {
+    margin-top: 30px;
+  }
+}
+
+/* Declared in a token file in the real export too, and just as unwelcome here:
+   a second face for a family the document already has resolves after the
+   document's own and would be used instead, with a src that cannot load. */
+@font-face {
+  font-family: "Iso Text";
+  src: url("../fonts/iso-text.ttf") format("truetype");
+}

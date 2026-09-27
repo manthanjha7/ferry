@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Scoped-surface token collision fixture</title>
+    <style>
+      :root {
+        --background: #FFFFFF;
+        /* A one-digit ramp step, which tokenPath's two-to-four-digit floor
+           strands and buildPath does not. */
+        --neutral-0: #FFFFFF;
+        /* Shape says STRING, the author says @kind other. Only the manifest
+           can tell the two apart, because CSSOM strips the comment. */
+        --dur-fast: 150ms;
+        /* Not a variable in any Figma sense; recovered as an effect style. */
+        --shadow-md: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+      }
+      .acme-deck {
+        --background: #FBFCFC;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="acme-deck" style="width:200px;height:200px;">
+      <div data-name="Scoped fill" style="width:200px;height:200px;background: var(--background);"></div>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <!--
+        Each probe carries a background so it extracts as a FRAME named from
+        `data-name` with the resolved text as its one child. An undecorated
+        <div> becomes a bare TEXT node named after its own characters, which
+        is exactly the string under test, so the assertion could not tell a
+        wrong value from a missing node.
+      -->
+      <div data-name="Props root" style="width: 360px; padding: 12px; font: 14px/20px monospace">
+        <!-- Reads a prop renderVals() also returns: renderVals must win. -->
+        <div data-name="Rendered" style="background: #eeeeee">{{ label }}</div>
+        <!-- Reads a prop the component also puts in state: props must win. -->
+        <div data-name="Shadowed" style="background: #eeeeee">{{ shadowed }}</div>
+        <!-- Reads a prop nothing else defines: the declared default must reach it. -->
+        <div data-name="Plain" style="background: #eeeeee">{{ tone }}</div>
+      </div>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{"$preview":{"width":360,"height":120},"tone":{"editor":"enum","options":["alpha","beta","gamma","delta","epsilon","zeta","eta"],"default":"alpha","tsType":"string"},"span":{"editor":"int","default":24,"min":1,"max":96,"tsType":"number"},"loud":{"editor":"boolean","default":false,"tsType":"boolean"},"shadowed":{"editor":null,"default":"from-props","tsType":"string"},"label":{"editor":null,"default":"from-props-label","tsType":"string"}}'
+    >
+      class Component extends DCLogic {
+        state = { shadowed: "from-state", tone: "from-state" };
+        renderVals() {
+          return { label: "from-renderVals" };
+        }
+      }
+    </script>
+  </body>
+</html>

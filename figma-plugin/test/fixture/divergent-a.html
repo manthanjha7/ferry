@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Two screens of one export, screen A</title>
+    <style>
+      /* Screen A of a two-screen export. Its twin, divergent-b.html, links the
+         same design system and declares three of these four names at the same
+         values and one at a different one.
+
+         That is not a hypothetical. Six of the 281 token paths in the real
+         three-screen Portage export hold different values in
+         `Portage Panel v1.dc.html` than in the two screens that agree:
+         --figma-color-text-secondary is #767676 there and #757575 here, and
+         --figma-color-text-danger is eleven steps of red apart. A Claude Design
+         document inlines the design system it was authored against, so two
+         screens exported weeks apart carry two snapshots of it and nothing in
+         either file says which is newer.
+
+         The real export is not committed: it references an internal design
+         system and this repo is headed for public. The values below are its
+         actual ones. */
+      .dx-theme-light {
+        --dx-surface: #ffffff;
+        --dx-muted: #767676;
+        --dx-line: #e6e6e6;
+        --dx-text: #1e1e1e;
+      }
+      .dx-theme-dark {
+        --dx-surface: #2c2c2c;
+        --dx-muted: #7e7e7e;
+        --dx-line: #444444;
+        --dx-text: #ffffff;
+      }
+    </style>
+  </head>
+  <body style="margin: 0">
+    <div class="dx-theme-light" data-name="A light root" style="width: 200px">
+      <div
+        data-name="A light panel"
+        style="width: 200px; height: 60px; background: var(--dx-surface); border: 1px solid var(--dx-line)"
+      >
+        <p data-name="A light label" style="margin: 0; color: var(--dx-muted)">A light muted</p>
+      </div>
+    </div>
+
+    <div class="dx-theme-dark" data-name="A dark root" style="width: 200px">
+      <div
+        data-name="A dark panel"
+        style="width: 200px; height: 60px; background: var(--dx-surface); border: 1px solid var(--dx-line)"
+      >
+        <p data-name="A dark label" style="margin: 0; color: var(--dx-muted)">A dark muted</p>
+      </div>
+    </div>
+  </body>
+</html>

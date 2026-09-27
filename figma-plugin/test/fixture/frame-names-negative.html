@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      The negative half of the naming fixture, kept in its own file so the
+      positive one can assert that NOTHING in it is left called "Frame".
+
+      This row is three separate components with uneven gaps, so no auto-layout
+      is inferred and the naming rules run all the way down. Their labels must
+      never be glued into one name: "My Searches Set Alert Clear" describes
+      nothing, and "Frame" at least does not lie. That is the whole reason the
+      inline-run rule tests `display: inline` exactly.
+    -->
+    <style>
+      body {
+        margin: 0;
+        background: #ffffff;
+        font: 12px/1.5 Helvetica, Arial, sans-serif;
+      }
+      .pill {
+        display: inline-block;
+        padding: 2px 8px;
+        background: #eeeeee;
+        border: none;
+        font: inherit;
+      }
+    </style>
+  </head>
+  <body>
+    <div data-name="Toolbar" style="padding: 16px; width: 360px">
+      <div style="font-size: 11px">
+        <button class="pill">My Searches</button
+        ><button class="pill" style="margin-left: 14px">Set Alert</button
+        ><button class="pill" style="margin-left: 2px">Clear</button>
+      </div>
+    </div>
+  </body>
+</html>

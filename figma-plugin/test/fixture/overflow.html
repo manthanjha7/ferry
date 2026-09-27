@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      Synthetic fixture for clipping.
+
+      The shape that matters is the one the shorthand hides: a scroll region
+      written `overflow-y:auto; overflow-x:hidden` computes `overflow` to the
+      single string "hidden auto", which is neither "hidden" nor "clip". Every
+      region below therefore has MORE content than box, so "did it clip" is a
+      question about the render and not about the declaration.
+
+      The pinned-footer shell is the real Portage panel's structure in
+      miniature: a fixed-height column whose middle scrolls and whose footer
+      must stay put.
+    -->
+    <style>
+      body {
+        margin: 0;
+        background: #ffffff;
+        font: 12px/1.5 Helvetica, Arial, sans-serif;
+      }
+      .shell {
+        width: 300px;
+        height: 200px;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        border: 1px solid #e6e6e6;
+      }
+      .head,
+      .foot {
+        flex: 0 0 auto;
+        padding: 8px;
+        background: #f5f5f5;
+      }
+      /* The defect, verbatim: one axis auto, the other hidden. */
+      .scroller {
+        flex: 1 1 auto;
+        overflow-y: auto;
+        overflow-x: hidden;
+        padding: 8px;
+      }
+      .tall > div {
+        height: 40px;
+      }
+      .scroll-both {
+        width: 120px;
+        height: 40px;
+        overflow: scroll;
+      }
+      .auto-both {
+        width: 120px;
+        height: 40px;
+        overflow: auto;
+      }
+      .clip-only {
+        width: 120px;
+        height: 40px;
+        overflow: clip;
+      }
+      .visible-both {
+        width: 120px;
+        height: 40px;
+        overflow: visible;
+      }
+      .x-only {
+        width: 120px;
+        height: 40px;
+        overflow-x: hidden;
+        overflow-y: visible;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell" data-name="Panel shell">
+      <div class="head" data-name="Pinned header">Header</div>
+      <div class="scroller tall" data-name="Scroll region">
+        <div>Row one</div>
+        <div>Row two</div>
+        <div>Row three</div>
+        <div>Row four</div>
+        <div>Row five</div>
+        <div>Row six</div>
+      </div>
+      <div class="foot" data-name="Pinned footer">Import</div>
+    </div>
+
+    <div class="scroll-both tall" data-name="Scroll both">
+      <div>Spilling one</div>
+      <div>Spilling two</div>
+    </div>
+    <div class="auto-both tall" data-name="Auto both">
+      <div>Spilling one</div>
+      <div>Spilling two</div>
+    </div>
+    <div class="clip-only tall" data-name="Clip both">
+      <div>Spilling one</div>
+      <div>Spilling two</div>
+    </div>
+    <div class="x-only tall" data-name="Hidden on x only">
+      <div>Spilling one</div>
+      <div>Spilling two</div>
+    </div>
+    <div class="visible-both tall" data-name="Visible both">
+      <div>Spilling one</div>
+      <div>Spilling two</div>
+    </div>
+  </body>
+</html>

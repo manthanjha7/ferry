@@ -1,0 +1,17 @@
+{
+  "name": "ferry",
+  "version": "0.1.0",
+  "description": "Import Claude Design screens into Figma as editable layers, with design tokens bound to Figma variables and themes as variable modes.",
+  "private": true,
+  "scripts": {
+    "build": "npm run typecheck && node build.mjs",
+    "watch": "node build.mjs --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@figma/plugin-typings": "^1.121.0",
+    "esbuild": "^0.24.2",
+    "typescript": "^5.9.3"
+  }
+}

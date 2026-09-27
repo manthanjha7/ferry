@@ -1,0 +1,82 @@
+/**
+ * Two bundles, two very different environments:
+ *
+ *   src/plugin/main.ts -> dist/code.js  (Figma sandbox: has `figma`, no DOM)
+ *   src/ui/main.ts     -> dist/ui.html  (iframe: has DOM, no `figma`)
+ *
+ * The UI bundle has to be *inlined* into the HTML. Figma reads `ui.html` as a
+ * single blob and serves it from an opaque origin, so a `<script src>` would
+ * have nothing to resolve against.
+ */
+
+import * as esbuild from "esbuild";
+import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = dirname(fileURLToPath(import.meta.url));
+const watch = process.argv.includes("--watch");
+
+const shared = {
+  bundle: true,
+  target: "es2017",
+  format: "iife",
+  logLevel: "info",
+};
+
+await mkdir(resolve(root, "dist"), { recursive: true });
+
+/** Inline the UI bundle into the HTML shell. */
+const inlineUiPlugin = {
+  name: "inline-ui",
+  setup(build) {
+    build.onEnd(async (result) => {
+      if (result.errors.length > 0) return;
+
+      const js = result.outputFiles?.find((f) => f.path.endsWith(".js"));
+      if (!js) return;
+
+      const template = await readFile(resolve(root, "ui.template.html"), "utf8");
+      // A literal `</script>` inside the bundle would close the tag early.
+      const safe = js.text.replace(/<\/script>/gi, "<\\/script>");
+
+      // Stamp the build so the running panel can be told apart from a cached
+      // one. Figma reuses plugin code between runs and gives no indication.
+      const stamp = new Date()
+        .toISOString()
+        .replace("T", " ")
+        .replace(/\.\d+Z$/, "");
+
+      await writeFile(
+        resolve(root, "dist/ui.html"),
+        template
+          .replace("/* __BUNDLE__ */", safe)
+          .replace("__BUILD__", stamp),
+        "utf8",
+      );
+      console.log(`  dist/ui.html (build ${stamp})`);
+    });
+  },
+};
+
+const pluginCtx = await esbuild.context({
+  ...shared,
+  entryPoints: [resolve(root, "src/plugin/main.ts")],
+  outfile: resolve(root, "dist/code.js"),
+});
+
+const uiCtx = await esbuild.context({
+  ...shared,
+  entryPoints: [resolve(root, "src/ui/main.ts")],
+  outfile: resolve(root, "dist/ui.js"),
+  write: false,
+  plugins: [inlineUiPlugin],
+});
+
+if (watch) {
+  await Promise.all([pluginCtx.watch(), uiCtx.watch()]);
+  console.log("watching…");
+} else {
+  await Promise.all([pluginCtx.rebuild(), uiCtx.rebuild()]);
+  await Promise.all([pluginCtx.dispose(), uiCtx.dispose()]);
+}

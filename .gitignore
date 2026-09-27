@@ -1,0 +1,8 @@
+node_modules/
+figma-plugin/test/fixture/bundle.js
+.DS_Store
+figma-plugin/test/e2e/run.mjs
+figma-plugin/test/e2e/captured/
+figma-plugin/test/fixture/real/
+figma-plugin/test/e2e/run-real.mjs
+brag-output/

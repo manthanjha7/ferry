@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Near-miss re-themes that are not a mode axis</title>
+    <style>
+      /* A real base layer, so the document still has a design system and the
+         assertion is "no modes" rather than "no tokens". */
+      :root {
+        --nv-bg: #ffffff;
+        --nv-text: #1e1e1e;
+      }
+
+      /* Every shape that looks like a theme and is not one, and nothing that
+         is. Detecting an axis here would put "Badge", or "Ok" and "Bad", or
+         "A" and "B" beside each other as Figma modes on a colour collection,
+         which is worse than the literals this file is supposed to produce. */
+
+      /* One block: nothing else declares these names, so there is no second
+         value for a mode to hold. */
+      .nv-badge {
+        --nv-badge-bg: #0d99ff;
+        --nv-badge-fg: #ffffff;
+        --nv-badge-radius: 4px;
+      }
+
+      /* Two blocks sharing ONE name at two values: a component variant. A theme
+         re-declares a set; a variant flips a property. */
+      .nv-chip-ok {
+        --nv-chip-bg: #00794b;
+      }
+      .nv-chip-bad {
+        --nv-chip-bg: #c8331a;
+      }
+
+      /* Two blocks sharing every name AND every value: an alias for one look. */
+      .nv-alias-a {
+        --nv-alias-bg: #f5f5f5;
+        --nv-alias-fg: #1e1e1e;
+        --nv-alias-line: #e6e6e6;
+      }
+      .nv-alias-b {
+        --nv-alias-bg: #f5f5f5;
+        --nv-alias-fg: #1e1e1e;
+        --nv-alias-line: #e6e6e6;
+      }
+    </style>
+  </head>
+  <body style="margin: 0">
+    <div data-name="Base fill" style="width: 40px; height: 20px; background: var(--nv-bg)"></div>
+    <div class="nv-badge" data-name="Badge" style="width: 40px; height: 20px; background: var(--nv-badge-bg)"></div>
+    <div class="nv-chip-ok" data-name="Chip ok" style="width: 40px; height: 20px; background: var(--nv-chip-bg)"></div>
+    <div class="nv-chip-bad" data-name="Chip bad" style="width: 40px; height: 20px; background: var(--nv-chip-bg)"></div>
+    <div class="nv-alias-a" data-name="Alias a" style="width: 40px; height: 20px; background: var(--nv-alias-bg)"></div>
+    <div class="nv-alias-b" data-name="Alias b" style="width: 40px; height: 20px; background: var(--nv-alias-bg)"></div>
+  </body>
+</html>

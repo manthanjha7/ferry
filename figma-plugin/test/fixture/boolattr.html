@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Boolean-attribute and self-closing-tag fixture</title>
+    <style>
+      body { margin: 0; font: 13px/1.4 ui-sans-serif, system-ui, sans-serif; }
+
+      /* Every probe below is read out of the IR as a fill colour, because the
+         IR carries no attributes: #22AA44 is "the attribute is absent" and
+         #CC2222 is "the attribute is present". A boolean attribute stringified
+         to "false" flips the probe to #CC2222 with no error and no count
+         moving, which is exactly the class of regression this fixture exists
+         to make visible. */
+      button.probe { width: 120px; height: 32px; border: 0; color: #FFFFFF; background: #22AA44; }
+      button.probe:disabled { background: #CC2222; }
+
+      input.probe { width: 14px; height: 14px; margin: 0; }
+      .checkprobe { width: 60px; height: 20px; background: #22AA44; }
+      input.probe:checked + .checkprobe { background: #CC2222; }
+    </style>
+  </head>
+  <body>
+    <x-dc>
+      <div data-name="Board" style="width:420px;padding:12px;display:flex;flex-direction:column;gap:16px">
+
+        <!-- A self-closed <x-import/> is not self-closed at all: only void
+             elements may be, so the parser leaves it open and the following
+             sibling is parsed as its CHILD. stubXImports then replaces the
+             whole subtree with one labelled box and "After x-import" is gone
+             from the import entirely. -->
+        <div data-name="X import row" style="display:flex;align-items:center;gap:8px;height:44px">
+          <x-import component-from-global-scope="Fixture.Widget" />
+          <div data-name="After x-import" style="width:80px;height:40px;background:#3355EE"></div>
+        </div>
+
+        <!-- Same shape for <dc-import/>. Nothing resolves dc-import yet, so
+             the failure here is quieter: "After dc-import" survives, one level
+             too deep, inside a wrapper the author never wrote. -->
+        <div data-name="Dc import row" style="display:flex;align-items:center;gap:8px;height:44px">
+          <dc-import name="Missing Panel" hint-size="60px,40px" />
+          <div data-name="After dc-import" style="width:80px;height:40px;background:#3355EE"></div>
+        </div>
+
+        <!-- disabled: `disabled="false"` disables. Verified live in the
+             Portage export's own Import button. -->
+        <div data-name="Disabled row" style="display:flex;align-items:center;gap:8px;height:44px">
+          <button class="probe" data-name="Enabled import" disabled="{{ off }}">Import</button>
+          <button class="probe" data-name="Truly disabled import" disabled="{{ on }}">Import</button>
+        </div>
+
+        <!-- checked: `checked="false"` renders a ticked box. -->
+        <div data-name="Checked row" style="display:flex;align-items:center;gap:8px;height:44px">
+          <input class="probe" type="checkbox" checked="{{ off }}" /><div class="checkprobe" data-name="Unticked probe"></div>
+          <input class="probe" type="checkbox" checked="{{ on }}" /><div class="checkprobe" data-name="Ticked probe"></div>
+        </div>
+
+        <!-- hidden: the loudest of the eight. `hidden="false"` computes to
+             display:none, so walk() drops the node and the whole subtree
+             leaves the import without a warning. -->
+        <div data-name="Hidden row" style="display:flex;align-items:center;gap:8px;height:44px">
+          <div data-name="Not hidden" hidden="{{ off }}" style="width:80px;height:24px;background:#3355EE"></div>
+          <div data-name="Truly hidden" hidden="{{ on }}" style="width:80px;height:24px;background:#3355EE"></div>
+        </div>
+
+      </div>
+    </x-dc>
+    <script type="text/x-dc" data-dc-script>
+      class Component extends DCLogic {
+        renderVals() {
+          return { off: false, on: true };
+        }
+      }
+    </script>
+  </body>
+</html>

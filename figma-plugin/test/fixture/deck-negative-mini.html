@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Deck-detection negative control</title>
+</head>
+<body>
+<div id="wrap">
+  <div id="group-no-label" style="display:flex;gap:12px;">
+    <section style="width:300px;height:200px;background:#eee;">One</section>
+    <section style="width:300px;height:200px;background:#ddd;">Two</section>
+  </div>
+  <div id="group-mismatched-size" style="display:flex;gap:12px;margin-top:20px;">
+    <section data-label="Left" style="width:300px;height:200px;background:#ccc;">Left</section>
+    <section data-label="Right" style="width:300px;height:260px;background:#bbb;">Right</section>
+  </div>
+</div>
+</body>
+</html>

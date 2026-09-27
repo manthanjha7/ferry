@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<!--
+  One screen of a two-screen export that ships its own design system, shaped
+  the way Claude Design writes one: the system's only readable name is the
+  `_ds/<name>-<uuid>/` folder, and the document reaches it through a relative
+  <link href>. The manifest beside it declares a `namespace` and no `name`.
+
+  The point of the fixture is what happens to that href: src/ui/main.ts inlines
+  it into a data: URI before the document is measured, so nothing downstream of
+  the mount can read the folder name back out of the markup.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link
+      rel="stylesheet"
+      href="_ds/acme-design-system-3f2a9c1e-7b4d-4e8a-9c21-5d6e7f8a9b0c/tokens/colors.css"
+    />
+    <style>
+      body { margin: 0; }
+      .card {
+        width: 240px;
+        height: 120px;
+        background: var(--color-surface);
+        color: var(--color-accent);
+        font: 16px/1.4 Inter, sans-serif;
+        padding: 16px;
+        box-sizing: border-box;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">Screen one</div>
+  </body>
+</html>

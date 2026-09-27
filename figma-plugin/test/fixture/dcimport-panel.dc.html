@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet>
+        <!--
+          The whole point of the helmet hoist lives here. Every colour below is
+          written `var(--dcip-…, #fallback)` and the definitions are in THIS
+          file, not the parent's. Lose the hoist and the panel still imports,
+          still counts as inlined, and renders entirely in fallback colours.
+        -->
+        <style>
+          .dcip-root {
+            --dcip-surface: #123456;
+            --dcip-chip: #ab4400;
+          }
+          .dcip-root.dcip-theme-dark {
+            --dcip-surface: #2c2c2c;
+          }
+        </style>
+        <!--
+          Real exports put a font loader or a polyfill here. mountDocument
+          (src/ui/extract.ts) adopts `head style, head link` and nothing else,
+          so a hoisted helmet script is dropped on the floor. Dropping it is
+          correct; doing it silently is not, and this is what proves the drop
+          reaches the import summary.
+        -->
+        <script>
+          document.documentElement.dataset.dcipHelmetRan = "yes";
+        </script>
+      </helmet>
+      <div
+        class="dcip-root dcip-theme-{{ theme }}"
+        data-name="Panel body"
+        style="
+          box-sizing: border-box;
+          width: 180px;
+          height: 90px;
+          padding: 10px;
+          background: var(--dcip-surface, #ffffff);
+          font: 12px/16px monospace;
+        "
+      >
+        <div data-name="Panel chip" style="background: var(--dcip-chip, #ffffff); padding: 2px">
+          {{ caption }}
+        </div>
+      </div>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{"$preview":{"width":180,"height":90},"tone":{"editor":"enum","options":["one","two","three"],"default":"one"},"theme":{"editor":"enum","options":["light","dark"],"default":"light"}}'
+    >
+      class Component extends DCLogic {
+        state = { tone: "from-state" };
+        renderVals() {
+          return { caption: "tone=" + (this.props.tone ?? "none") };
+        }
+      }
+    </script>
+  </body>
+</html>

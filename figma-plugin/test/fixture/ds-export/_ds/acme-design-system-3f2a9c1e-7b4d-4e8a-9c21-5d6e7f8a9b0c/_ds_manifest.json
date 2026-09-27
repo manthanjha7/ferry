@@ -1,0 +1,11 @@
+{
+  "namespace": "AcmeDesignSystem_3f2a9c",
+  "themes": [],
+  "tokens": [
+    { "name": "--acme-green-500", "value": "#1B6F58", "kind": "color", "definedIn": "tokens/colors.css" },
+    { "name": "--acme-green-700", "value": "#0A2920", "kind": "color", "definedIn": "tokens/colors.css" },
+    { "name": "--acme-grey-100", "value": "#ECEDED", "kind": "color", "definedIn": "tokens/colors.css" },
+    { "name": "--color-surface", "value": "var(--acme-grey-100)", "kind": "color", "definedIn": "tokens/colors.css" },
+    { "name": "--color-accent", "value": "var(--acme-green-500)", "kind": "color", "definedIn": "tokens/colors.css" }
+  ]
+}

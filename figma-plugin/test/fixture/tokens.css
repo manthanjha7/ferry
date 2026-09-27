@@ -1,0 +1,48 @@
+/*
+ * Token fixture. The colour ramp and the primitive -> semantic aliasing are
+ * copied verbatim from a real Claude Design `_ds/.../tokens/colors.css` so the
+ * alias-detection and reverse-matching paths are exercised against the shape
+ * they will actually meet, not an idealised one.
+ */
+
+:root {
+  /* ---------- Primitives: brand ramp ---------- */
+  --acme-green-50: #F2FAF6;
+  --acme-green-100: #E2F4EC;
+  --acme-green-400: #4FC39C;
+  --acme-green-500: #29AB87;
+  --acme-green-700: #1B6F58;
+  --acme-green-900: #0D4A3B;
+  --acme-green-950: #0A2920;
+
+  /* ---------- Primitives: neutrals ---------- */
+  --neutral-0: #FFFFFF;
+  --neutral-100: #F5F5F5;
+  --neutral-200: #E5E5E5;
+  --neutral-600: #525252;
+  --neutral-900: #171717;
+
+  --amber-500: #F59E0B;
+
+  /* This one is annotated as a non-token value and must be skipped. */
+  --acme-gradient: linear-gradient(180deg, #31A47F 0%, #1B6F58 100%); /* @kind other */
+
+  /* ---------- Semantic layer: aliases onto the primitives ---------- */
+  --background: var(--neutral-0);
+  --foreground: var(--acme-green-950);
+  --card: var(--neutral-0);
+  --primary: var(--acme-green-700);
+  --primary-foreground: var(--neutral-0);
+  --muted: var(--neutral-100);
+  --muted-foreground: var(--neutral-600);
+  --border: var(--neutral-200);
+  --ring: var(--acme-green-400);
+
+  /* ---------- Spacing + radius ---------- */
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+}

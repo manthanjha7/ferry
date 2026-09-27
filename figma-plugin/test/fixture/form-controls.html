@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      Synthetic fixture for form-control extraction.
+
+      Every control here is a shape the extractor used to lose: a <select>'s
+      chosen option, an <input>'s value, an <input>'s placeholder, a
+      <textarea>'s placeholder, and a checked checkbox. None of those is a DOM
+      text node, so the ordinary text walk cannot see any of them.
+
+      Also present are the two shapes that already worked and must keep
+      working unchanged: a <button>'s label and a <textarea>'s initial value,
+      which ARE child text nodes.
+
+      Geometry is deliberately explicit (fixed heights, known padding, a
+      right-aligned number field) so an assertion can check where the text
+      landed, not just that a string exists.
+    -->
+    <style>
+      body {
+        margin: 0;
+        background: #eceded;
+        font: 12px/1.5 Helvetica, Arial, sans-serif;
+        color: #1a1a1a;
+      }
+      .panel {
+        width: 360px;
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .field {
+        box-sizing: border-box;
+        width: 100%;
+        height: 24px;
+        padding: 0 6px;
+        font-size: 11px;
+        background: #f5f5f5;
+        border: 1px solid #e6e6e6;
+        border-radius: 4px;
+      }
+      .number {
+        width: 58px;
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      .area {
+        height: 50px;
+        padding: 6px 8px;
+        font-size: 10px;
+        line-height: 14px;
+      }
+      .toggle {
+        width: 13px;
+        height: 13px;
+        margin: 0;
+        accent-color: #0d99ff;
+      }
+      .primary {
+        height: 30px;
+        padding: 0 12px;
+        font-size: 11px;
+        color: #ffffff;
+        background: #0d99ff;
+        border: none;
+        border-radius: 6px;
+      }
+      ::placeholder {
+        color: #b3b3b3;
+        opacity: 1;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="panel">
+      <select class="field" data-name="Collection picker">
+        <option>Create a new local collection</option>
+        <option>Primitives</option>
+      </select>
+
+      <select class="field" data-name="Preselected picker">
+        <option>Not this one</option>
+        <option selected>Semantic tokens</option>
+      </select>
+
+      <select class="field" data-name="Styled picker" style="appearance: none">
+        <option>No native arrow</option>
+      </select>
+
+      <input
+        class="field number"
+        data-name="Width field"
+        type="number"
+        value="1440"
+        min="320"
+        max="4096"
+      />
+
+      <input class="field" data-name="Named field" type="text" value="Portage panel" />
+
+      <input
+        class="field"
+        data-name="Empty field"
+        type="text"
+        placeholder="Search filings"
+      />
+
+      <textarea
+        class="field area"
+        data-name="Paste box"
+        placeholder="&lt;!doctype html&gt; …"
+      ></textarea>
+
+      <textarea class="field area" data-name="Filled box">Already a text node</textarea>
+
+      <input class="toggle" data-name="Checked box" type="checkbox" checked />
+      <input class="toggle" data-name="Unchecked box" type="checkbox" />
+      <input class="toggle" data-name="Checked dot" type="radio" checked />
+
+      <input type="file" data-name="Hidden file" style="display: none" />
+
+      <button class="primary" data-name="Import button">Import</button>
+
+      <!-- No id, no class, no data-name, and UA padding: proves the insets are
+           read off the control rather than hard-coded to this fixture's CSS. -->
+      <select style="height: 24px"><option>Unnamed select</option></select>
+    </div>
+  </body>
+</html>

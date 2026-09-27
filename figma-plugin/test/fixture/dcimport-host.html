@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet>
+        <style>
+          body {
+            margin: 0;
+            background: #eceded;
+          }
+        </style>
+      </helmet>
+      <div data-name="Board" style="display: flex; gap: 20px; align-items: flex-start; padding: 20px">
+        <!-- Three instances of one target, each with a different prop, to prove
+             every call site renders on its own instance rather than sharing one. -->
+        <div data-name="Cell one" style="width: 180px">
+          <dc-import name="Dcimport Panel" tone="one" hint-size="180px,90px"></dc-import>
+        </div>
+        <div data-name="Cell two" style="width: 180px">
+          <dc-import name="Dcimport Panel" tone="two" hint-size="180px,90px"></dc-import>
+        </div>
+
+        <!-- Inside a conditional: its children live in a <template>'s inert
+             .content fragment, which querySelectorAll cannot reach. Only a
+             splice that runs during resolveNode, after the conditional has been
+             applied, ever sees this one. -->
+        <sc-if value="{{ showThird }}" hint-placeholder-val="{{ true }}">
+          <div data-name="Cell three" style="width: 180px">
+            <dc-import name="Dcimport Panel" tone="three" hint-size="180px,90px"></dc-import>
+          </div>
+        </sc-if>
+
+        <!-- theme="dark" selects a rule that only exists in the TARGET's own
+             helmet. Without the hoist this renders the var() fallback. -->
+        <div data-name="Cell dark" style="width: 180px">
+          <dc-import
+            name="Dcimport Panel"
+            tone="dark"
+            theme="dark"
+            hint-size="180px,90px"
+          ></dc-import>
+        </div>
+
+        <div data-name="Cell missing" style="width: 180px">
+          <dc-import name="Missing Panel" hint-size="200px,120px"></dc-import>
+        </div>
+
+        <!-- No hint-size at all: the placeholder has to supply both, or the box
+             collapses to zero height and walk() drops it. -->
+        <div data-name="Cell unsized" style="width: 180px">
+          <dc-import name="Unsized Panel"></dc-import>
+        </div>
+
+        <div data-name="Cell cycle" style="width: 180px">
+          <dc-import name="Dcimport Cycle" hint-size="180px,40px"></dc-import>
+        </div>
+      </div>
+    </x-dc>
+    <script type="text/x-dc" data-dc-script>
+      class Component extends DCLogic {
+        renderVals() {
+          return { showThird: true };
+        }
+      }
+    </script>
+  </body>
+</html>

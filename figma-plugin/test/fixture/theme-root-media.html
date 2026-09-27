@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Colour-scheme re-theme fixture</title>
+    <style>
+      /* A dark theme behind the OS colour scheme. Read as before, the :root
+         inside the media query landed in the base layer and overwrote every
+         light value with its dark one, so the base mode held the wrong theme. */
+      :root {
+        --ms-canvas: #ffffff;
+        --ms-ink: #1e1e1e;
+        --ms-line: #e6e6e6;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --ms-canvas: #1e1e1e;
+          --ms-ink: #ffffff;
+          --ms-line: #444444;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div data-name="Media page" style="width: 200px; height: 40px; background: var(--ms-canvas)"></div>
+  </body>
+</html>

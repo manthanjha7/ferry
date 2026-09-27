@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Iso panel</title>
+    <!--
+      Links the design system's FONT file and nothing else, exactly as the real
+      canvas board does: `tokens/fonts.css` is the one _ds file it references,
+      which is why the rest of the token folder has to be found and injected
+      separately (collectDsTokenCss, src/ui/main.ts) and why what that
+      injection is allowed to contain matters so much.
+    -->
+    <link rel="stylesheet" href="_ds/iso-design-system-0000/tokens/fonts.css" />
+  </head>
+  <body>
+    <div data-name="Root" style="width: 600px; padding: 0; background: #ffffff">
+      <!--
+        Exactly ten characters at 20px in a shrink-to-fit box. The design
+        system's font advances one em per glyph, so this is 200px wide when the
+        right file was inlined, 100px when the decoy beside the document was,
+        and something else again when no face loaded at all and it fell back.
+      -->
+      <div
+        data-name="Sample"
+        style="
+          display: inline-block;
+          font-family: 'Iso Text';
+          font-size: 20px;
+          line-height: 24px;
+        "
+      >ABCDEFGHIJ</div>
+
+      <!-- The token file gives .iso-card 40px of padding. The document gives it
+           10px and 40px of content, and 60px is the only right answer. -->
+      <div class="iso-card" data-name="Card" style="padding: 10px">
+        <div data-name="Card body" style="height: 40px; background: #eceded"></div>
+      </div>
+
+      <!-- Styled by nothing at all, so it inherits from the mount container. A
+           `body { line-height: 3; font-size: 40px }` reaching this page shows
+           up here as a text box more than twice the height. -->
+      <div data-name="Plain">Plain</div>
+
+      <!-- The half that MUST change when the token CSS is supplied: padding
+           comes from a custom property the document never defines itself. -->
+      <div data-name="Var box" style="padding: var(--iso-pad, 0px)">
+        <div data-name="Var body" style="height: 20px; background: #eceded"></div>
+      </div>
+    </div>
+  </body>
+</html>

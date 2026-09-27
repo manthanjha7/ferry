@@ -1,0 +1,25 @@
+<!doctype html>
+<!--
+  Two single lines of the same face and size, one at line-height:normal and one
+  at an explicit 28px. `normal` is the font's own leading, which the browser
+  reads off its metrics and Figma reads off a possibly different face; left as
+  AUTO in the IR the two disagree by a couple of pixels and a column of text
+  imports shorter than it rendered. The extractor measures Chrome's strut and
+  pins it, so "Normal metrics" carries a concrete pixel line-height while
+  "Fixed metrics" carries the 28 it authored. See makeRun / normalLineHeight in
+  src/ui/extract.ts.
+-->
+<meta charset="utf-8" />
+<style>
+  /* The stage this mounts in imposes its own line-height, so `normal` has to
+     be set explicitly or the paragraph would inherit a resolved px value and
+     never exercise the normal-leading path. */
+  body { margin: 0; line-height: 1.5; }
+  p { margin: 0; }
+  .normal { font-family: Arial, sans-serif; font-size: 16px; line-height: normal; }
+  .fixed { font-family: Arial, sans-serif; font-size: 16px; line-height: 28px; }
+</style>
+<body>
+  <p class="normal">Normal metrics</p>
+  <p class="fixed">Fixed metrics</p>
+</body>

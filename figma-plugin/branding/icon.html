@@ -1,0 +1,41 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  html, body { margin: 0; padding: 0; width: 128px; height: 128px; overflow: hidden; background: transparent; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<!--
+  Ferry plugin icon, 128x128. Figma-native palette (#0d99ff). The mark reads
+  code crossing into a Figma frame: a chevron (code / forward motion, the
+  "ferry" carrying across) entering a rounded frame whose contents are two
+  variable-token dots. Rounded square so it looks intentional wherever Figma
+  does not apply its own mask.
+-->
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1a9dff"/>
+      <stop offset="1" stop-color="#0a84dd"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="128" height="128" rx="30" fill="url(#bg)"/>
+
+  <!-- The Figma frame the design lands in -->
+  <rect x="58" y="38" width="46" height="52" rx="10"
+        fill="none" stroke="#ffffff" stroke-width="7"/>
+  <!-- Variables that bind inside it -->
+  <circle cx="74" cy="64" r="4.5" fill="#ffffff"/>
+  <circle cx="90" cy="64" r="4.5" fill="#ffffff" opacity="0.55"/>
+
+  <!-- Chevron: code crossing into the frame (the carry / ferry motion) -->
+  <path d="M24 46 L42 64 L24 82"
+        fill="none" stroke="#ffffff" stroke-width="9"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
+</body>
+</html>

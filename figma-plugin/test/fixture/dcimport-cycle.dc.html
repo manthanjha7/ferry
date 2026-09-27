@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <!-- Imports itself. Without an ancestor-chain guard this recurses until
+           the stack gives out, taking the whole import with it. -->
+      <div data-name="Cycle body" style="width: 180px">
+        <dc-import name="Dcimport Cycle" hint-size="180px,40px"></dc-import>
+      </div>
+    </x-dc>
+  </body>
+</html>

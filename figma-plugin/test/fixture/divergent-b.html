@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Two screens of one export, screen B</title>
+    <style>
+      /* Screen B, against divergent-a.html. Three of these four names are
+         identical in both files and one is not, which is what makes a batch
+         import of the two a test rather than a demonstration:
+
+           --dx-surface   identical in both themes    binds in both screens
+           --dx-text      identical in both themes    binds in both screens
+           --dx-muted     differs in BOTH themes      binds in neither theme here
+           --dx-line      differs in the DARK theme   binds in this screen's
+                                                      light half and not its dark
+
+         The last row is the one a per-token answer gets wrong. A token that
+         agrees in the mode a node actually resolves in is a binding worth
+         keeping, and the real export has both shapes: its
+         --figma-color-text-secondary differs everywhere, its
+         --figma-color-bg-selected differs only inside .cd2f-theme-dark.
+
+         #757575 against A's #767676, and #7a7a7a against A's #7e7e7e, are the
+         real export's own numbers. One step per channel is invisible, which is
+         luck rather than a defence: nothing bounds how far apart two exports of
+         one system can drift, and the same export's --figma-color-text-danger
+         is #d32f0f against #c8331a. */
+      .dx-theme-light {
+        --dx-surface: #ffffff;
+        --dx-muted: #757575;
+        --dx-line: #e6e6e6;
+        --dx-text: #1e1e1e;
+      }
+      .dx-theme-dark {
+        --dx-surface: #2c2c2c;
+        --dx-muted: #7a7a7a;
+        --dx-line: #333333;
+        --dx-text: #ffffff;
+      }
+    </style>
+  </head>
+  <body style="margin: 0">
+    <div class="dx-theme-light" data-name="B light root" style="width: 200px">
+      <div
+        data-name="B light panel"
+        style="width: 200px; height: 60px; background: var(--dx-surface); border: 1px solid var(--dx-line)"
+      >
+        <p data-name="B light label" style="margin: 0; color: var(--dx-muted)">B light muted</p>
+      </div>
+    </div>
+
+    <div class="dx-theme-dark" data-name="B dark root" style="width: 200px">
+      <div
+        data-name="B dark panel"
+        style="width: 200px; height: 60px; background: var(--dx-surface); border: 1px solid var(--dx-line)"
+      >
+        <p data-name="B dark label" style="margin: 0; color: var(--dx-muted)">B dark muted</p>
+      </div>
+    </div>
+  </body>
+</html>

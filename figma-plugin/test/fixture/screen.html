@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <meta name="design_doc_mode" content="canvas">
+  <link rel="stylesheet" href="tokens.css">
+  <style>
+    *{box-sizing:border-box;}
+    body{margin:0;}
+  </style>
+</helmet>
+
+<!-- Canvas-mode board, absolutely positioned at a large offset like the real thing -->
+<div id="Board" style="position:absolute;left:80px;top:48px;width:900px;">
+
+  <!-- CASE 1: explicit flex row, gap from a spacing token, background via var() -->
+  <div data-name="Header" style="display:flex;align-items:center;justify-content:space-between;gap:24px;padding:24px;background:var(--card);border:1px solid var(--border);border-radius:16px;box-shadow:rgba(10, 41, 32, 0.14) 0px 24px 48px -28px;">
+    <div style="display:flex;align-items:center;gap:12px;">
+      <span style="width:34px;height:34px;border-radius:12px;background:#1B6F58;"></span>
+      <h1 style="margin:0;font-family:'Red Hat Display',sans-serif;font-weight:700;font-size:24px;line-height:1.2;letter-spacing:-0.02em;color:#0A2920;">Quarterly close</h1>
+    </div>
+    <button style="padding:8px 16px;border:none;border-radius:12px;background:#1B6F58;color:#FFFFFF;font-family:'DM Sans',sans-serif;font-size:14px;font-weight:600;">Review</button>
+  </div>
+
+  <!-- CASE 2: normal-flow block stack with EVEN gaps -> should infer auto-layout -->
+  <div data-name="Even stack" style="margin-top:24px;padding:16px;background:#F5F5F5;border-radius:12px;">
+    <div style="height:44px;background:#FFFFFF;border-radius:8px;margin-bottom:12px;"></div>
+    <div style="height:44px;background:#FFFFFF;border-radius:8px;margin-bottom:12px;"></div>
+    <div style="height:44px;background:#FFFFFF;border-radius:8px;"></div>
+  </div>
+
+  <!-- CASE 3: UNEVEN gaps -> must stay absolute (negative control) -->
+  <div data-name="Uneven stack" style="margin-top:24px;padding:16px;background:#F5F5F5;border-radius:12px;">
+    <div style="height:30px;background:#FFFFFF;margin-bottom:6px;"></div>
+    <div style="height:30px;background:#FFFFFF;margin-bottom:28px;"></div>
+    <div style="height:30px;background:#FFFFFF;"></div>
+  </div>
+
+  <!-- CASE 4: mixed inline runs inside one text block -->
+  <p data-name="Mixed text" style="margin:24px 0 0;font-family:'DM Sans',sans-serif;font-size:15px;line-height:1.55;color:#525252;">
+    Revenue rose <b style="color:#1B6F58;">18.4%</b> against a
+    <span style="color:#F59E0B;font-style:italic;">restated</span> prior period.
+    <a href="https://example.com/filing" style="color:#29AB87;text-decoration:underline;">See filing</a>.
+  </p>
+
+  <!-- CASE 5: gradient + uppercase tracking + inline SVG -->
+  <div data-name="Gradient card" style="margin-top:24px;padding:24px;border-radius:16px;background:linear-gradient(180deg, #31A47F 0%, #1B6F58 100%);">
+    <div style="font-family:'Geist Mono',monospace;font-size:10px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:#E2F4EC;">Reading key</div>
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-label="Sparkle">
+      <path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4L12 2z" fill="#4FC39C"/>
+    </svg>
+  </div>
+
+  <!-- CASE 6: per-side border + dashed -->
+  <div data-name="Side border" style="margin-top:24px;padding:16px;border-left:3px dashed #F59E0B;background:#FFFFFF;">
+    <span style="font-family:'DM Sans',sans-serif;font-size:12px;color:#525252;">Sample data — swap before sharing.</span>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

@@ -1,0 +1,1153 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      /*
+       * Theme.
+       *
+       * `figma.showUI(..., { themeColors: true })` (src/plugin/main.ts) makes
+       * Figma inject the real `--figma-color-*` values into this iframe and put
+       * `figma-light` or `figma-dark` on <html>. Those injected values are the
+       * truth, and this block must never be able to beat them.
+       *
+       * Hence the `:not()` scoping rather than `:root`. Figma defines its
+       * variables under `.figma-light` / `.figma-dark`, which score exactly the
+       * same specificity as `:root`, so a `:root` block here would be decided by
+       * whichever stylesheet the browser saw last, i.e. by luck. Losing that
+       * coin toss means every dark-mode user gets a white panel with white text.
+       * Scoped this way the block cannot apply at all inside Figma; it is only
+       * ever the fallback for a plain browser (a preview, the headless probe).
+       *
+       * Values are the design's own `.cd2f-theme-light` / `.cd2f-theme-dark`
+       * blocks, kept whole, which is also why every `var()` below can carry the
+       * matching light literal as its inline fallback.
+       *
+       * Declared on the shell rather than on <html>, and that is load-bearing
+       * rather than tidy. Custom properties and `color-scheme` INHERIT, and the
+       * imported document is mounted into this same page as a child of <body>
+       * (`mountDocument`, src/ui/extract.ts). Anything inheritable declared
+       * above that container reaches it, so on <html> these would be measured as
+       * if they were the document's own: a document reading
+       * `var(--figma-color-text)` outside its own theme block would silently
+       * pick up the panel's value, and one carrying a form control would render
+       * it in the panel's colour scheme. On the shell they cannot escape,
+       * because #cd2f-stage is the shell's SIBLING, not its child.
+       */
+      html:not(.figma-light):not(.figma-dark) body > #cd2f-app {
+        color-scheme: light;
+        --figma-color-bg: #ffffff;
+        --figma-color-bg-secondary: #f5f5f5;
+        --figma-color-bg-brand: #0d99ff;
+        --figma-color-bg-selected: #e5f4ff;
+        --figma-color-bg-warning: #ffcd29;
+        --figma-color-bg-warning-tertiary: #fff8e0;
+        --figma-color-text: #1e1e1e;
+        --figma-color-text-secondary: #767676;
+        --figma-color-text-tertiary: #b3b3b3;
+        --figma-color-text-brand: #007be5;
+        --figma-color-text-onbrand: #ffffff;
+        --figma-color-text-danger: #c8331a;
+        --figma-color-text-success: #00794b;
+        --figma-color-border: #e6e6e6;
+        --figma-color-border-selected: #0d99ff;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        html:not(.figma-light):not(.figma-dark) body > #cd2f-app {
+          color-scheme: dark;
+          --figma-color-bg: #2c2c2c;
+          --figma-color-bg-secondary: #383838;
+          --figma-color-bg-brand: #0d99ff;
+          --figma-color-bg-selected: #153a5c;
+          --figma-color-bg-warning: #e5a000;
+          --figma-color-bg-warning-tertiary: #3a2f14;
+          --figma-color-text: #ffffff;
+          --figma-color-text-secondary: #b3b3b3;
+          --figma-color-text-tertiary: #7e7e7e;
+          --figma-color-text-brand: #7cc4f8;
+          --figma-color-text-onbrand: #ffffff;
+          --figma-color-text-danger: #ffafa3;
+          --figma-color-text-success: #4ecf9a;
+          --figma-color-border: #444444;
+          --figma-color-border-selected: #0d99ff;
+        }
+      }
+
+      /*
+       * Figma injects the colours but not `color-scheme`, and the parts of this
+       * panel Chrome draws for us (the select popup, the number spinner, the
+       * scrollbar gutter, the focus ring) follow `color-scheme` and nothing
+       * else. Without these two lines a dark-theme user gets a white dropdown.
+       * On the shell for the same reason as the block above: `color-scheme` is
+       * inherited, and on <html> it would reach the mounted document too.
+       */
+      html.figma-light body > #cd2f-app {
+        color-scheme: light;
+      }
+
+      html.figma-dark body > #cd2f-app {
+        color-scheme: dark;
+      }
+
+      /*
+       * Isolation, both ways.
+       *
+       * The plugin renders the USER'S imported document into this same page in
+       * order to measure it: a nested iframe would have an opaque origin and be
+       * unreadable, so `mountDocument` (src/ui/extract.ts) mounts it in a
+       * #cd2f-stage container under <body> and adopts its stylesheets into this
+       * document's head.
+       *
+       * That makes the traffic two-way, and the direction that used to be
+       * ignored is the expensive one. A `cd2f-` namespace stops a STRANGER's
+       * rules landing on the panel, but it does nothing to stop the PANEL's
+       * rules landing on the document being measured, and namespacing is no
+       * defence at all when the document is a design OF this panel: the real
+       * export of this very panel uses `.cd2f-header`, `.cd2f-root` and the bare panel ids
+       * throughout, so `.cd2f-header { display: flex }` here collapsed its
+       * header's two stacked lines into one row and moved everything below it
+       * by 19px. The extractor then measured, faithfully, a layout this
+       * stylesheet had invented.
+       *
+       * So every rule below is scoped `body > #cd2f-app`, and that prefix is
+       * structural rather than decorative: the stage container is a CHILD of
+       * <body>, so the document's own elements are always at least its
+       * grandchildren and can never match `body > ...`, whatever ids or classes
+       * they carry. It also raises every panel rule to an id's specificity,
+       * which is what keeps a stranger's `.cd2f-header { display: block }` from
+       * winning against ours on source order (the adopted sheet lands after
+       * this one). Both directions are asserted in test/fixture/harness.html.
+       *
+       * Nothing inheritable may be declared above the stage, which is why the
+       * theme variables sit on the shell (see above) and why the only rules
+       * left on html/body set non-inherited properties.
+       */
+      html,
+      body {
+        margin: 0 !important;
+        padding: 0 !important;
+        background: var(--figma-color-bg, #ffffff) !important;
+      }
+
+      /*
+       * The page behind the panel, in literals. `--figma-color-bg` is Figma's
+       * own injected value inside Figma and undefined anywhere else now that
+       * the fallbacks live on the shell, so a plain-browser dark preview would
+       * otherwise paint the canvas white behind a dark panel.
+       */
+      @media (prefers-color-scheme: dark) {
+        html:not(.figma-light):not(.figma-dark),
+        html:not(.figma-light):not(.figma-dark) body {
+          background: #2c2c2c !important;
+        }
+      }
+
+      /*
+       * The chrome must not share a font-family NAME with the document it
+       * imports. A Claude Design export ships its own `@font-face { font-family:
+       * "Inter" }`, and mountDocument adopts that face into this same <head> so
+       * the extractor can measure text in the real font (src/ui/extract.ts).
+       * A web @font-face overrides any same-named font for the whole document,
+       * so the moment the export's face loads, every "Inter" in the chrome
+       * repaints in the export's cut, and it lingers after the stage is
+       * disposed, because a CSS-connected face cannot be evicted through the
+       * API. That is the button "distortion".
+       *
+       * So the chrome asks for a PRIVATE family instead, sourced with `local()`.
+       * `local()` resolves only to an INSTALLED font and never to a web
+       * @font-face, so this is pinned to the machine's own Inter and an import
+       * cannot touch it. With no Inter installed the face has no usable src and
+       * the family below falls through to the system stack, exactly as it does
+       * today. Either way the look is frozen to what it is now, minus the hijack.
+       */
+      @font-face {
+        font-family: "cd2f-ui";
+        font-style: normal;
+        font-weight: 100 900;
+        src: local("Inter"), local("Inter var"), local("InterVariable"),
+          local("Inter Variable");
+      }
+
+      body > #cd2f-app,
+      body > #cd2f-app * {
+        box-sizing: border-box !important;
+        font-family: "cd2f-ui", -apple-system, BlinkMacSystemFont, "Segoe UI",
+          Roboto, sans-serif !important;
+        text-transform: none !important;
+        text-shadow: none !important;
+        letter-spacing: 0 !important;
+      }
+
+      body > #cd2f-app * {
+        margin: 0;
+        padding: 0;
+      }
+
+      body > #cd2f-app input,
+      body > #cd2f-app select,
+      body > #cd2f-app button,
+      body > #cd2f-app textarea {
+        font-family: inherit !important;
+        font-size: 11px !important;
+        color: var(--figma-color-text, #1e1e1e) !important;
+        outline: none;
+        transition: border-color 120ms ease, background 120ms ease;
+      }
+
+      body > #cd2f-app ::placeholder {
+        color: var(--figma-color-text-tertiary, #b3b3b3);
+        opacity: 1;
+      }
+
+      body > #cd2f-app ::-webkit-scrollbar {
+        width: 9px;
+        height: 9px;
+      }
+
+      body > #cd2f-app ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+
+      body > #cd2f-app ::-webkit-scrollbar-thumb {
+        background: var(--figma-color-border, #e6e6e6);
+        border: 2px solid transparent;
+        background-clip: padding-box;
+        border-radius: 5px;
+      }
+
+      body > #cd2f-app ::-webkit-scrollbar-thumb:hover {
+        background: var(--figma-color-text-tertiary, #b3b3b3);
+        background-clip: padding-box;
+      }
+
+      /*
+       * Fixed shell, scrolling middle, pinned footer. The panel is 400x620 and
+       * the options have outgrown it, so letting the whole thing scroll would
+       * push Import and the build stamp off the bottom, which is exactly what
+       * happened once and cost a debugging cycle when a stale build could not be
+       * identified from inside the panel.
+       *
+       * `height: 100vh` rather than the design's literal 620px: the iframe is
+       * already sized by `showUI` and tracking it means one number to change,
+       * not two that can disagree.
+       */
+      body > #cd2f-app {
+        position: relative;
+        /* The imported document is rendered into this same page and can carry
+           any z-index it likes, so the panel claims the top of the stack and
+           #cd2f-stage below claims the bottom. */
+        z-index: 2147483000;
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        overflow: hidden;
+        background: var(--figma-color-bg, #ffffff) !important;
+        color: var(--figma-color-text, #1e1e1e) !important;
+        font-size: 11px !important;
+        line-height: 16px !important;
+        font-weight: 400 !important;
+        text-align: left !important;
+        -webkit-font-smoothing: antialiased;
+        font-feature-settings: "cv05" 1, "ss03" 1;
+      }
+
+      #cd2f-stage {
+        z-index: 0;
+      }
+
+      /* --- header ------------------------------------------------------- */
+
+      body > #cd2f-app .cd2f-header {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: flex-start;
+        gap: 9px;
+        padding: 13px 14px 12px;
+        border-bottom: 1px solid var(--figma-color-border, #e6e6e6);
+      }
+
+      body > #cd2f-app .cd2f-brand {
+        flex: 0 0 auto;
+        width: 16px;
+        height: 16px;
+        margin-top: 1px;
+        border-radius: 4px;
+        background: var(--figma-color-bg-brand, #0d99ff);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 9px !important;
+        font-weight: 600 !important;
+        color: var(--figma-color-text-onbrand, #ffffff) !important;
+      }
+
+      body > #cd2f-app .cd2f-headings {
+        flex: 1 1 auto;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      body > #cd2f-app .cd2f-title {
+        font-size: 12px !important;
+        font-weight: 600 !important;
+        line-height: 16px;
+      }
+
+      body > #cd2f-app .cd2f-subtitle {
+        font-size: 11px !important;
+        line-height: 15px;
+        color: var(--figma-color-text-secondary, #767676) !important;
+        text-wrap: pretty;
+      }
+
+      /* --- body and sections -------------------------------------------- */
+
+      body > #cd2f-app .cd2f-body {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        overflow-x: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+
+      /* A flex column would otherwise shrink the sections to fit rather than
+         scroll them. */
+      body > #cd2f-app .cd2f-body > * {
+        flex: 0 0 auto !important;
+      }
+
+      body > #cd2f-app .cd2f-section {
+        display: flex;
+        flex-direction: column;
+        gap: 9px;
+        padding: 13px 14px;
+        border-bottom: 1px solid var(--figma-color-border, #e6e6e6);
+      }
+
+      body > #cd2f-app .cd2f-section--source {
+        gap: 10px;
+      }
+
+      body > #cd2f-app .cd2f-section:last-child {
+        padding-bottom: 15px;
+        border-bottom: none;
+      }
+
+      body > #cd2f-app .cd2f-section-title {
+        font-size: 11px !important;
+        font-weight: 600 !important;
+        line-height: 16px;
+      }
+
+      /* --- text ---------------------------------------------------------- */
+
+      body > #cd2f-app .cd2f-label {
+        display: block;
+        font-size: 11px !important;
+        font-weight: 400 !important;
+        line-height: 15px;
+      }
+
+      /* The left column of the two-column field pattern. Fixed rather than
+         intrinsic so Screen, States, Collection and Viewport width all line
+         their fields up on the same edge. */
+      body > #cd2f-app .cd2f-field-label {
+        flex: 0 0 92px;
+        font-size: 11px !important;
+        color: var(--figma-color-text-secondary, #767676) !important;
+      }
+
+      body > #cd2f-app .cd2f-hint {
+        font-size: 10px !important;
+        line-height: 14px;
+        color: var(--figma-color-text-tertiary, #b3b3b3) !important;
+        text-wrap: pretty;
+      }
+
+      body > #cd2f-app .cd2f-muted {
+        font-size: 11px !important;
+        line-height: 16px;
+        color: var(--figma-color-text-secondary, #767676) !important;
+      }
+
+      /* The saved-design-system line reads as a value plus its actions, so the
+         value keeps the primary colour and only the separators recede. */
+      body > #cd2f-app .cd2f-ds-line {
+        font-size: 11px !important;
+        line-height: 16px;
+      }
+
+      body > #cd2f-app #cd2f-ds-status {
+        font-weight: 500 !important;
+      }
+
+      body > #cd2f-app .cd2f-sep {
+        color: var(--figma-color-text-tertiary, #b3b3b3) !important;
+      }
+
+      /* 92px label + 10px gap, so a hint sits under its field rather than under
+         the label. */
+      body > #cd2f-app .cd2f-indent {
+        padding-left: 102px;
+      }
+
+      body > #cd2f-app .cd2f-link {
+        color: var(--figma-color-text-brand, #007be5) !important;
+        cursor: pointer;
+        border-radius: 2px;
+      }
+
+      body > #cd2f-app .cd2f-link:hover {
+        text-decoration: underline;
+      }
+
+      /*
+       * The two places that genuinely want monospace, and they have to shout to
+       * get it. The shell asserts one font family over every descendant with
+       * `!important` to survive an imported stylesheet, and form controls carry
+       * a second `!important` on top of that (`.cd2f-root textarea`, above).
+       * Two classes here outscores that class-plus-type selector, which is why
+       * `.cd2f-paste` alone was not enough: the paste box came out in Inter.
+       */
+      body > #cd2f-app .cd2f-mono,
+      body > #cd2f-app .cd2f-paste {
+        font-family: ui-monospace, "Geist Mono", SFMono-Regular, Menlo,
+          monospace !important;
+      }
+
+      /* --- rows and fields ----------------------------------------------- */
+
+      body > #cd2f-app .cd2f-field-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      body > #cd2f-app .cd2f-field-row--top {
+        align-items: flex-start;
+      }
+
+      /* The States label is beside a list box several rows tall, so top
+         alignment needs a nudge to sit level with the first option. */
+      body > #cd2f-app .cd2f-field-row--top .cd2f-field-label {
+        padding-top: 4px;
+      }
+
+      body > #cd2f-app .cd2f-field-row--baseline {
+        align-items: baseline;
+      }
+
+      body > #cd2f-app .cd2f-field-value {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+
+      body > #cd2f-app .cd2f-field {
+        background: var(--figma-color-bg, #ffffff) !important;
+        border: 1px solid var(--figma-color-border, #e6e6e6) !important;
+        border-radius: 5px !important;
+      }
+
+      body > #cd2f-app .cd2f-field:hover {
+        border-color: var(--figma-color-text-tertiary, #b3b3b3) !important;
+      }
+
+      body > #cd2f-app .cd2f-field:focus,
+      body > #cd2f-app .cd2f-field:focus-visible {
+        border-color: var(--figma-color-border-selected, #0d99ff) !important;
+        box-shadow: 0 0 0 1px var(--figma-color-border-selected, #0d99ff) inset;
+      }
+
+      /*
+       * No `flex` shorthand: this select is used both in a flex ROW (beside a
+       * 92px label) and in a flex COLUMN (under the Map radio), and a
+       * `flex: 1 1 auto` that fills the row would try to grow vertically in the
+       * column. `width: 100%` shrinks to the space left in the row and spans the
+       * column, which is the same answer in both.
+       */
+      body > #cd2f-app .cd2f-select {
+        width: 100%;
+        height: 28px;
+        padding: 0 4px 0 7px;
+      }
+
+      /*
+       * A list box, not a dropdown: `size` on a `multiple` select is what stops
+       * the browser collapsing it to one row where a second ticked prop is
+       * invisible. `renderStates` sets `size` per document, so the height here
+       * has to stay automatic.
+       */
+      body > #cd2f-app #cd2f-states {
+        height: auto;
+        padding: 2px;
+      }
+
+      body > #cd2f-app #cd2f-states option {
+        padding: 2px 6px;
+        color: var(--figma-color-text, #1e1e1e);
+      }
+
+      body > #cd2f-app .cd2f-paste {
+        width: 100%;
+        height: 46px;
+        min-height: 46px;
+        padding: 7px 8px;
+        font-size: 10px !important;
+        line-height: 14px;
+        resize: vertical;
+      }
+
+      body > #cd2f-app .cd2f-number {
+        width: 66px;
+        height: 28px;
+        padding: 0 6px 0 7px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      /*
+       * Checkbox and radio rows. 13px for the control, the rest for its label,
+       * and the hint hangs under the label rather than under the control, so a
+       * two-line explanation reads as one block of text.
+       */
+      body > #cd2f-app .cd2f-row {
+        display: grid;
+        grid-template-columns: 13px 1fr;
+        column-gap: 9px;
+        align-items: start;
+        cursor: pointer;
+      }
+
+      body > #cd2f-app .cd2f-row-text {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        min-width: 0;
+      }
+
+      body > #cd2f-app .cd2f-row input[type="checkbox"],
+      body > #cd2f-app .cd2f-row input[type="radio"] {
+        width: 13px;
+        height: 13px;
+        margin-top: 1px;
+        accent-color: var(--figma-color-bg-brand, #0d99ff);
+        cursor: pointer;
+      }
+
+      body > #cd2f-app .cd2f-row input:disabled {
+        cursor: default;
+      }
+
+      /* --- dropzone ------------------------------------------------------ */
+
+      body > #cd2f-app .cd2f-dropzone {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        min-height: 78px;
+        padding: 14px 12px;
+        text-align: center;
+        border: 1px dashed var(--figma-color-border, #e6e6e6);
+        border-radius: 6px;
+        background: var(--figma-color-bg, #ffffff);
+        /* The whole zone opens the file picker (see the `dropzone` click
+           handler in src/ui/main.ts), so it has to read as clickable. */
+        cursor: pointer;
+        transition: background 120ms ease, border-color 120ms ease;
+      }
+
+      body > #cd2f-app .cd2f-dropzone:hover {
+        background: var(--figma-color-bg-secondary, #f5f5f5) !important;
+        border-color: var(--figma-color-text-tertiary, #b3b3b3) !important;
+      }
+
+      body > #cd2f-app .cd2f-drop-title {
+        font-size: 11px !important;
+        font-weight: 500 !important;
+        line-height: 16px;
+      }
+
+      /*
+       * The `!important` here is not decoration. `:hover` scores higher than a
+       * plain class, so without it the drag-over state would vanish the moment
+       * the cursor sat over the zone, which is every moment it matters.
+       *
+       * `.cd2f-drop-full` is the design's loaded-file treatment for the zone.
+       * Nothing adds it yet: the UI reports the loaded file on the footer
+       * status line instead (`previewSelection`), so adopting it means a change
+       * in src/ui/main.ts, not in this file. Kept so that change is a one-line
+       * `classList.add`.
+       */
+      body > #cd2f-app .cd2f-drop-full,
+      body > #cd2f-app .cd2f-drop-full:hover,
+      body > #cd2f-app .cd2f-dropzone--active {
+        border-style: solid !important;
+        border-color: var(--figma-color-border-selected, #0d99ff) !important;
+        background: var(--figma-color-bg-selected, #e5f4ff) !important;
+      }
+
+      /* --- warning ------------------------------------------------------- */
+
+      /*
+       * Shown with `.style.display = "block"` (`showTokenWarning` and friends),
+       * so this stays a block box and the button carries the design's 8px gap
+       * itself. A flex `gap` would simply never apply.
+       */
+      body > #cd2f-app .cd2f-warning {
+        padding: 9px 11px 10px;
+        border-radius: 6px;
+        border-left: 2px solid var(--figma-color-bg-warning, #ffcd29);
+        background: var(--figma-color-bg-warning-tertiary, #fff8e0);
+      }
+
+      body > #cd2f-app .cd2f-warning-text {
+        font-size: 11px !important;
+        line-height: 15px;
+        color: var(--figma-color-text, #1e1e1e) !important;
+        text-wrap: pretty;
+      }
+
+      /* --- divider ------------------------------------------------------- */
+
+      body > #cd2f-app .cd2f-divider {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding-top: 1px;
+        font-size: 10px !important;
+        line-height: 14px;
+        color: var(--figma-color-text-tertiary, #b3b3b3) !important;
+      }
+
+      body > #cd2f-app .cd2f-divider::before,
+      body > #cd2f-app .cd2f-divider::after {
+        content: "";
+        flex: 1 1 auto;
+        height: 1px;
+        background: var(--figma-color-border, #e6e6e6);
+      }
+
+      /* --- token modes --------------------------------------------------- */
+
+      body > #cd2f-app #cd2f-token-mode {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      /*
+       * The controls that belong to one mode, indented under its radio so the
+       * collection picker reads as part of "map onto my design system" rather
+       * than as a fourth thing to decide. Hidden for the other two modes: a
+       * dimmed picker under an unselected radio still looks like a choice.
+       *
+       * 22px is the row's own 13px control plus its 9px gap, so the indented
+       * block starts exactly where its label does. `renderTokenMode` shows this
+       * with `display: flex`, which is why the direction lives here.
+       */
+      body > #cd2f-app .cd2f-mode-body {
+        display: none;
+        flex-direction: column;
+        gap: 7px;
+        margin-left: 22px;
+      }
+
+      body > #cd2f-app .cd2f-mode-reason:empty {
+        display: none;
+      }
+
+      /* --- buttons ------------------------------------------------------- */
+
+      body > #cd2f-app .cd2f-actions {
+        display: flex;
+        gap: 8px;
+      }
+
+      /* Self-defined so nothing an imported stylesheet leaks can move the label:
+         centered by flex rather than an inherited line-height, native chrome
+         off, one text line that never wraps. */
+      body > #cd2f-app .cd2f-btn-primary {
+        flex: 1 1 auto;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        height: 32px;
+        line-height: 1 !important;
+        white-space: nowrap;
+        font-weight: 500 !important;
+        background: var(--figma-color-bg-brand, #0d99ff);
+        border: none;
+        border-radius: 6px;
+        -webkit-appearance: none;
+        appearance: none;
+        cursor: pointer;
+      }
+
+      body > #cd2f-app button.cd2f-btn-primary {
+        color: var(--figma-color-text-onbrand, #ffffff) !important;
+      }
+
+      /* Greyed rather than dimmed: `opacity` on brand blue in dark mode reads as
+         a slightly duller live button. */
+      body > #cd2f-app button.cd2f-btn-primary:disabled {
+        background: var(--figma-color-bg-secondary, #f5f5f5) !important;
+        color: var(--figma-color-text-tertiary, #b3b3b3) !important;
+        cursor: default;
+      }
+
+      body > #cd2f-app .cd2f-btn-primary:not(:disabled):hover {
+        filter: brightness(0.93);
+      }
+
+      body > #cd2f-app .cd2f-btn-secondary {
+        flex: 0 0 auto;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        height: 32px;
+        line-height: 1 !important;
+        white-space: nowrap;
+        padding: 0 14px;
+        font-weight: 500 !important;
+        background: transparent;
+        border: 1px solid var(--figma-color-border, #e6e6e6);
+        border-radius: 6px;
+        -webkit-appearance: none;
+        appearance: none;
+        cursor: pointer;
+      }
+
+      body > #cd2f-app .cd2f-btn-secondary:hover {
+        background: var(--figma-color-bg-secondary, #f5f5f5) !important;
+        border-color: var(--figma-color-text-tertiary, #b3b3b3) !important;
+      }
+
+      /* Inside the warning panel, and toggled with `.style.display = "block"`,
+         which for a button still shrinks to fit rather than filling the row. */
+      /* Left on the default button display: it is shown by toggling
+         `.style.display = "block"` (src/ui/main.ts), which would beat an
+         inline-flex set here anyway. It carries appearance:none only. */
+      body > #cd2f-app .cd2f-btn-quiet {
+        margin-top: 8px;
+        height: 24px;
+        min-height: 24px;
+        padding: 0 9px;
+        white-space: nowrap;
+        font-weight: 500 !important;
+        background: transparent;
+        border: 1px solid var(--figma-color-border, #e6e6e6);
+        border-radius: 5px;
+        -webkit-appearance: none;
+        appearance: none;
+        cursor: pointer;
+      }
+
+      body > #cd2f-app .cd2f-btn-quiet:hover {
+        background: var(--figma-color-bg, #ffffff) !important;
+      }
+
+      /* --- footer -------------------------------------------------------- */
+
+      body > #cd2f-app .cd2f-footer {
+        flex: 0 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 9px;
+        padding: 11px 14px 12px;
+        border-top: 1px solid var(--figma-color-border, #e6e6e6);
+        background: var(--figma-color-bg, #ffffff) !important;
+      }
+
+      body > #cd2f-app .cd2f-progress {
+        width: 100%;
+        height: 3px;
+        border-radius: 2px;
+        overflow: hidden;
+        background: var(--figma-color-bg-secondary, #f5f5f5);
+      }
+
+      body > #cd2f-app .cd2f-progress-bar {
+        width: 0%;
+        height: 100%;
+        border-radius: 2px;
+        background: var(--figma-color-bg-brand, #0d99ff);
+        transition: width 180ms linear;
+      }
+
+      body > #cd2f-app .cd2f-status-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 7px;
+        min-height: 15px;
+      }
+
+      /*
+       * `setStatus` writes `className = "cd2f-status cd2f-status--<stage>"`,
+       * which wipes anything else on the element. So the stage colour has to
+       * live in these classes and nowhere else: an inline colour would outrank
+       * them and freeze the status line on one colour forever.
+       */
+      body > #cd2f-app .cd2f-status {
+        flex: 1 1 auto;
+        font-size: 11px !important;
+        line-height: 15px;
+        color: var(--figma-color-text, #1e1e1e) !important;
+        text-wrap: pretty;
+      }
+
+      body > #cd2f-app .cd2f-status--idle {
+        color: var(--figma-color-text-secondary, #767676) !important;
+      }
+
+      body > #cd2f-app .cd2f-status--done {
+        color: var(--figma-color-text-success, #00794b) !important;
+      }
+
+      body > #cd2f-app .cd2f-status--error {
+        color: var(--figma-color-text-danger, #c8331a) !important;
+      }
+
+      /*
+       * The importing spinner, driven off that same className write rather than
+       * needing an id of its own. It sits AFTER the status line in the markup
+       * because `~` only looks forward, and `order: -1` puts it back on the left
+       * where the design has it.
+       */
+      body > #cd2f-app .cd2f-spinner {
+        display: none;
+        order: -1;
+        flex: 0 0 auto;
+        width: 10px;
+        height: 10px;
+        margin-top: 2px;
+        border-radius: 50%;
+        border: 1.5px solid var(--figma-color-border, #e6e6e6);
+        border-top-color: var(--figma-color-bg-brand, #0d99ff);
+        animation: cd2f-spin 720ms linear infinite;
+      }
+
+      body > #cd2f-app .cd2f-status--working ~ .cd2f-spinner {
+        display: block;
+      }
+
+      @keyframes cd2f-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      body > #cd2f-app .cd2f-summary {
+        max-height: 91px;
+        overflow-y: auto;
+        padding: 4px 9px 5px;
+        border-radius: 5px;
+        background: var(--figma-color-bg-secondary, #f5f5f5);
+      }
+
+      /*
+       * One line per result. `renderSummary` hands us whole sentences ("554
+       * layers created"), not a count and a label, so the design's 34px numeric
+       * column has nothing to put in it; the tabular figures are what survives
+       * of it, and they still keep the leading counts aligned down the list.
+       */
+      body > #cd2f-app .cd2f-summary-line {
+        padding: 2px 0;
+        font-size: 11px !important;
+        line-height: 15px;
+        color: var(--figma-color-text-secondary, #767676) !important;
+        font-variant-numeric: tabular-nums;
+        text-wrap: pretty;
+      }
+
+      body > #cd2f-app .cd2f-footnote {
+        font-size: 10px !important;
+        line-height: 14px;
+        color: var(--figma-color-text-tertiary, #b3b3b3) !important;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="cd2f-root" id="cd2f-app">
+      <div class="cd2f-header">
+        <div class="cd2f-brand" aria-hidden="true">F</div>
+        <div class="cd2f-headings">
+          <div class="cd2f-title">Ferry</div>
+          <div class="cd2f-subtitle">
+            Import Claude Design screens as editable layers, with your design
+            tokens bound to Figma variables.
+          </div>
+        </div>
+      </div>
+
+      <div class="cd2f-body">
+        <div class="cd2f-section cd2f-section--source">
+          <!--
+            .zip is named because it is accepted directly: a Claude Design
+            project export IS a .zip, and `expandZipFiles` unpacks it into the
+            same File[] a folder pick produces. Leaving it unsaid sent people
+            looking for an unzip step that does not exist.
+          -->
+          <div class="cd2f-dropzone" id="cd2f-dropzone">
+            <div class="cd2f-drop-title">Drop your .html file or .zip export</div>
+            <div class="cd2f-muted">
+              or <span class="cd2f-link" id="cd2f-pick-file">choose a file</span>
+              ·
+              <span class="cd2f-link" id="cd2f-pick-folder">choose a folder</span>
+            </div>
+          </div>
+          <!--
+            Two inputs on purpose. `webkitdirectory` puts the OS picker into
+            folder-only mode, which makes selecting a single self-contained
+            .html impossible, and that is the common case.
+
+            `accept` covers .zip as well as .html because a project export
+            arrives as one. It deliberately does not list .htm: `htmlCandidates`
+            (src/ui/screens.ts) matches ".html" only, so offering .htm would let
+            someone pick a file that is then reported as no file at all.
+          -->
+          <input
+            type="file"
+            id="cd2f-file"
+            accept=".html,text/html,.zip,application/zip"
+            multiple
+            style="display: none"
+          />
+          <input type="file" id="cd2f-folder" webkitdirectory style="display: none" />
+
+          <!--
+            A Claude Design project folder holds every screen in the project, so
+            picking one silently would be a coin toss.
+
+            The wrapper is a plain block because `renderScreenPicker` shows it
+            with `display: block`; the two-column pattern lives on the row
+            inside it.
+          -->
+          <div id="cd2f-page-row" style="display: none">
+            <div class="cd2f-field-row">
+              <label class="cd2f-field-label" for="cd2f-page">Screen</label>
+              <select class="cd2f-field cd2f-select" id="cd2f-page"></select>
+            </div>
+            <!--
+              Its first option is "All screens (N)", which is what a project
+              export usually means, so the line beneath has to say what that will
+              do to the canvas before the click rather than after it.
+            -->
+            <div class="cd2f-hint cd2f-indent" id="cd2f-page-hint"></div>
+          </div>
+
+          <!--
+            A document's `data-props` schema is already its prototype definition:
+            the panel that declares state(7) x theme(2) is the same fourteen
+            panels its author hand-assembled on a board beside it. Ticking props
+            here asks for that grid directly instead of importing one frame and
+            rebuilding it by hand.
+
+            A multi-select rather than a checkbox each: the list is whatever the
+            document declares, which is nothing at all for most documents, so the
+            control has to be able to disappear.
+          -->
+          <div id="cd2f-states-row" style="display: none">
+            <div class="cd2f-field-row cd2f-field-row--top">
+              <label class="cd2f-field-label" for="cd2f-states">States</label>
+              <select
+                class="cd2f-field cd2f-select"
+                id="cd2f-states"
+                multiple
+                size="3"
+              ></select>
+            </div>
+            <!--
+              The arithmetic lives here, before the click, because past the cap
+              the matrix is refused rather than trimmed and "untick a prop" is
+              only actionable while there is still a prop ticked.
+            -->
+            <div class="cd2f-hint cd2f-indent" id="cd2f-states-hint"></div>
+          </div>
+
+          <div class="cd2f-warning" id="cd2f-token-warning" style="display: none">
+            <div class="cd2f-warning-text" id="cd2f-token-warning-text"></div>
+            <button class="cd2f-btn-quiet" id="cd2f-copy-prompt">
+              Copy prompt
+            </button>
+          </div>
+
+          <div class="cd2f-divider">or paste markup</div>
+          <textarea
+            class="cd2f-field cd2f-paste"
+            id="cd2f-paste"
+            placeholder="&lt;!doctype html&gt; …"
+            spellcheck="false"
+          ></textarea>
+        </div>
+
+        <div class="cd2f-section">
+          <div class="cd2f-section-title">Design tokens</div>
+          <!--
+            Three operations, not one setting. Mapping onto an existing system,
+            building one out of the export, and importing literal colours are
+            different jobs, and one dropdown listing collections alongside
+            "Create a new collection" and "Don't create variables" made the
+            choice between them look like a choice of collection. That is why
+            this is a radio group and not the single collection row the design
+            drew.
+          -->
+          <div id="cd2f-token-mode" role="radiogroup" aria-label="Design tokens">
+            <label class="cd2f-row">
+              <input type="radio" name="cd2f-token-mode" id="cd2f-token-mode-map" />
+              <span class="cd2f-row-text">
+                <span class="cd2f-label">Map onto my design system</span>
+                <!--
+                  Left empty on purpose: `renderTokenMode` writes the reason this
+                  mode cannot be picked into it, keyed by the data attribute
+                  rather than an id because the two halves are one control.
+                -->
+                <span
+                  class="cd2f-hint cd2f-mode-reason"
+                  data-cd2f-reason="map"
+                ></span>
+              </span>
+            </label>
+            <div class="cd2f-mode-body" id="cd2f-target-row">
+              <select class="cd2f-field cd2f-select" id="cd2f-target"></select>
+              <label class="cd2f-row" id="cd2f-create-missing-row">
+                <input type="checkbox" id="cd2f-create-missing" checked />
+                <span class="cd2f-row-text">
+                  <span class="cd2f-label"
+                    >Create variables for what it does not cover</span
+                  >
+                  <span class="cd2f-hint"
+                    >Anything your library doesn't cover lands in a separate
+                    local collection rather than being dropped</span
+                  >
+                </span>
+              </label>
+            </div>
+
+            <label class="cd2f-row">
+              <input
+                type="radio"
+                name="cd2f-token-mode"
+                id="cd2f-token-mode-build"
+              />
+              <span class="cd2f-row-text">
+                <span class="cd2f-label">Build a design system from this export</span>
+                <span
+                  class="cd2f-hint cd2f-mode-reason"
+                  data-cd2f-reason="build"
+                ></span>
+              </span>
+            </label>
+            <div class="cd2f-mode-body" id="cd2f-build-row">
+              <span class="cd2f-hint" id="cd2f-build-status"></span>
+            </div>
+
+            <label class="cd2f-row">
+              <input type="radio" name="cd2f-token-mode" id="cd2f-token-mode-none" />
+              <span class="cd2f-row-text">
+                <span class="cd2f-label">None</span>
+                <!-- No data attribute: None has no precondition to fail, so
+                     nothing ever overwrites this line. -->
+                <span class="cd2f-hint cd2f-mode-reason"
+                  >Colours import as literal values</span
+                >
+              </span>
+            </label>
+          </div>
+
+          <!--
+            Outside the mode group on purpose: this CSS decides what the offscreen
+            render measures, which matters in all three modes.
+          -->
+          <div class="cd2f-field-row cd2f-field-row--baseline">
+            <span class="cd2f-field-label">Design system CSS</span>
+            <div class="cd2f-field-value cd2f-ds-line">
+              <span id="cd2f-ds-status">none</span
+              ><span class="cd2f-sep"> · </span
+              ><span class="cd2f-link" id="cd2f-pick-ds">add token files</span
+              ><span id="cd2f-ds-forget-wrap" style="display: none"
+                ><span class="cd2f-sep"> · </span
+                ><span class="cd2f-link" id="cd2f-ds-forget">forget</span></span
+              >
+            </div>
+          </div>
+          <div class="cd2f-hint cd2f-indent">
+            Only needed when the document doesn't link its own
+            <code class="cd2f-mono">_ds</code> tokens, which exported decks
+            usually don't.
+          </div>
+          <input type="file" id="cd2f-ds" accept=".css" multiple style="display: none" />
+        </div>
+
+        <div class="cd2f-section">
+          <div class="cd2f-section-title">Options</div>
+          <label class="cd2f-row">
+            <input type="checkbox" id="cd2f-infer-stacks" checked />
+            <span class="cd2f-row-text">
+              <span class="cd2f-label">Infer auto-layout</span>
+              <span class="cd2f-hint"
+                >Turn evenly-spaced stacks into auto-layout, not just explicit
+                flex</span
+              >
+            </span>
+          </label>
+          <!--
+            No `max`: `extractOptions` clamps the low end only, so an upper bound
+            here would paint a perfectly usable width as invalid without
+            stopping it being used.
+          -->
+          <div class="cd2f-field-row">
+            <span class="cd2f-field-label">Viewport width</span>
+            <input
+              class="cd2f-field cd2f-number"
+              type="number"
+              id="cd2f-width"
+              value="1440"
+              min="320"
+              step="20"
+            />
+            <span class="cd2f-muted">px</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="cd2f-footer">
+        <div class="cd2f-progress" id="cd2f-progress" style="display: none">
+          <div class="cd2f-progress-bar" id="cd2f-progress-bar"></div>
+        </div>
+
+        <div class="cd2f-status-row">
+          <div class="cd2f-status cd2f-status--idle" id="cd2f-status"></div>
+          <!-- After the status line, not before it. See .cd2f-spinner above. -->
+          <div class="cd2f-spinner" aria-hidden="true"></div>
+        </div>
+
+        <div class="cd2f-summary" id="cd2f-summary" style="display: none"></div>
+
+        <div class="cd2f-actions">
+          <button class="cd2f-btn-primary" id="cd2f-import" disabled>Import</button>
+          <button class="cd2f-btn-secondary" id="cd2f-close">Close</button>
+        </div>
+
+        <div class="cd2f-footnote">
+          Runs entirely on your machine. No network access. Not affiliated with
+          Anthropic.
+          <!--
+            Figma caches plugin code between runs, so "did my rebuild actually
+            load?" is otherwise unanswerable from inside the panel. This stamp
+            makes it a glance. build.mjs substitutes it.
+          -->
+          <br />build __BUILD__
+        </div>
+      </div>
+    </div>
+
+    <script>
+      /* __BUNDLE__ */
+    </script>
+  </body>
+</html>

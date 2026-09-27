@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Deck-stage mini fixture</title>
+</head>
+<body>
+<deck-stage width="400" height="300">
+<section data-label="Intro" data-speaker-notes="Short note" style="width:400px;height:300px;background:#111;color:#fff;">Intro slide</section>
+<section data-label="Middle" data-speaker-notes="This speaker note is intentionally written to run past sixty characters so it gets dropped instead of appended." style="width:400px;height:300px;background:#222;color:#fff;">Middle slide</section>
+<section style="width:400px;height:300px;background:#333;color:#fff;">Untitled slide with no data-label at all, should fall back to Slide N</section>
+</deck-stage>
+</body>
+</html>

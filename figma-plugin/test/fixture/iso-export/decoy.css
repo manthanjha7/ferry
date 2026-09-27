@@ -1,0 +1,19 @@
+/* =========================================================
+   The other half of the resolution test.
+
+   This sheet sits beside the document rather than under _ds/, and it names
+   fonts/iso-text.ttf, the file the design system's own `url("../fonts/…")`
+   would have found if it were resolved against the document instead of against
+   itself. Half the advance width, so a document using it measures 100px where
+   the same string in the same size measures 200px with the right file.
+
+   Two sheets naming two different files by two different relative paths, and
+   each has to get the one it names.
+   ========================================================= */
+
+@font-face {
+  font-family: "Iso Text";
+  font-style: normal;
+  font-weight: 400;
+  src: url("fonts/iso-text.ttf") format("truetype");
+}

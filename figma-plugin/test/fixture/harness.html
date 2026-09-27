@@ -1,0 +1,2577 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Extractor harness</title>
+    <style>
+      body {
+        font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+        margin: 24px;
+        max-width: 900px;
+      }
+      .pass { color: #1e8e3e; }
+      .fail { color: #d93025; font-weight: 700; }
+      h2 { font-size: 14px; margin: 20px 0 6px; }
+      pre { background: #f5f5f5; padding: 10px; overflow-x: auto; }
+    </style>
+  </head>
+  <body>
+    <h1>Claude Design → Figma: extractor harness</h1>
+    <div id="results">Running…</div>
+    <h2>IR tree</h2>
+    <pre id="tree"></pre>
+
+    <script src="bundle.js"></script>
+    <script>
+      const results = [];
+      const check = (name, condition, detail) => {
+        results.push({ name, ok: !!condition, detail: detail ?? "" });
+      };
+
+      const findByName = (node, name) => {
+        if (node.name === name) return node;
+        for (const child of node.children || []) {
+          const hit = findByName(child, name);
+          if (hit) return hit;
+        }
+        return null;
+      };
+
+      const outline = (node, depth = 0) => {
+        const pad = "  ".repeat(depth);
+        const layout = node.layout
+          ? ` [${node.layout.mode.toLowerCase()} gap:${node.layout.gap} ${node.layout.source}]`
+          : node.children.length > 1
+            ? " [absolute]"
+            : "";
+        const tokens = [];
+        for (const fill of node.fills || []) {
+          if (fill.token) tokens.push(`${fill.token.name}(${fill.token.via})`);
+        }
+        if (node.border?.paint.token) {
+          tokens.push(`border:${node.border.paint.token.name}`);
+        }
+        if (node.cornerToken) tokens.push(`radius:${node.cornerToken.name}`);
+        if (node.layout?.gapToken) tokens.push(`gap:${node.layout.gapToken.name}`);
+        const tokenText = tokens.length ? ` {${tokens.join(", ")}}` : "";
+        let line = `${pad}${node.kind} "${node.name}" ${Math.round(node.width)}x${Math.round(node.height)}${layout}${tokenText}\n`;
+        for (const child of node.children || []) line += outline(child, depth + 1);
+        return line;
+      };
+
+      // IRDocument is plain JSON except IMAGE nodes carry `imageBytes` as a
+      // Uint8Array, which JSON.stringify silently drops. Walk the tree and
+      // swap any Uint8Array for a plain-JSON-safe { __u8: [...] } shape so
+      // the Node-side test can convert it back. Shared by both the default
+      // assertion run and the ?real=1 measurement run.
+      const u8Safe = (value) => {
+        if (value instanceof Uint8Array) return { __u8: Array.from(value) };
+        if (Array.isArray(value)) return value.map(u8Safe);
+        if (value && typeof value === "object") {
+          const out = {};
+          for (const key of Object.keys(value)) out[key] = u8Safe(value[key]);
+          return out;
+        }
+        return value;
+      };
+
+      const capture = async (name, irDocument) => {
+        try {
+          const res = await fetch(`/capture/${name}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(u8Safe(irDocument)),
+          });
+          const json = await res.json();
+          if (!res.ok || !json.ok) throw new Error(`server responded ${res.status}`);
+          console.log(`HARNESS CAPTURED ${name} ${json.bytes}`);
+          return { ok: true, bytes: json.bytes };
+        } catch (e) {
+          console.log(`HARNESS CAPTURE FAILED: ${e.message}`);
+          return { ok: false, error: e.message };
+        }
+      };
+
+      window.__CD2F_DEBUG = true;
+
+      const params = new URLSearchParams(location.search);
+      const realParam = params.get("real");
+      // "?real=1" is a legacy alias for the original (and still default)
+      // real fixture, homepage. "?real=<name>" loads real/<name>.html.
+      const realName = realParam === "1" ? "homepage" : realParam;
+      // "&ds=1" loads the Claude Design system's token CSS files
+      // (test/fixture/real/ds-tokens/*.css — gitignored, fetched from the
+      // live Claude Design project) and passes their concatenated text as
+      // `extraCss`, simulating fix (A): a user supplying the design system
+      // separately because the document itself only links a slice of it
+      // (the deck fixture links only tokens/fonts.css).
+      const dsFlag = params.get("ds") === "1";
+
+      if (realName) {
+        runReal(realName, dsFlag).catch((e) => {
+          document.getElementById("results").innerHTML =
+            `<div class="fail">Harness threw: ${e.message}</div>`;
+          console.log(`HARNESS ERROR: ${e.message}\n${e.stack}`);
+        });
+      } else {
+        runDefault().catch((e) => {
+          document.getElementById("results").innerHTML =
+            `<div class="fail">Harness threw: ${e.message}</div>`;
+          console.log(`HARNESS ERROR: ${e.message}\n${e.stack}`);
+        });
+      }
+
+      // -----------------------------------------------------------------
+      // ?real=<name> — measurement run against a full-scale real fixture.
+      // Not an assertion suite: fetches real/<name>.html, extracts it, and
+      // reports scale/shape metrics instead. "?real=1" is a legacy alias
+      // for name === "homepage".
+      // -----------------------------------------------------------------
+      async function runReal(name, withDs) {
+        console.log(`HARNESS REAL start (${name}${withDs ? " +ds" : ""})`);
+        const html = await (await fetch(`real/${name}.html`)).text();
+        console.log(`HARNESS REAL fetched ${html.length} bytes`);
+
+        // Fix (A): load the design-system token CSS separately and pass it
+        // as extraCss, exactly as ui/main.ts does with the user-supplied
+        // "Design system" file picker (designSystemCss).
+        let extraCss;
+        if (withDs) {
+          const dsFiles = [
+            "colors.css",
+            "typography.css",
+            "spacing.css",
+            "shadows.css",
+            "motion.css",
+            "fonts.css",
+          ];
+          const parts = await Promise.all(
+            dsFiles.map((f) => fetch(`real/ds-tokens/${f}`).then((r) => r.text())),
+          );
+          extraCss = parts.join("\n");
+          console.log(
+            `HARNESS REAL ds=1: loaded ${dsFiles.length} token files, ${extraCss.length} bytes of extraCss`,
+          );
+        }
+
+        // Boot-phase modules (ExtractOptions.moduleSources, src/ir/index.ts):
+        // sibling .js files a document's componentDidMount -> import() can
+        // load, exactly as src/ui/main.ts's collectModuleSources populates
+        // them from whatever else was dropped alongside the .dc.html. Opt in
+        // with `?modules=a.js,b.js` (fetched from real/<name>) — e.g.
+        // `?real=<fixture>&modules=data.js` for a real fixture whose script
+        // has a `componentDidMount` (see resolve.ts's bootAndRender doc
+        // comment). Empty/absent means "no sibling modules", exactly like a
+        // lone-file drop in the real UI.
+        const modulesParam = params.get("modules");
+        const moduleNames = modulesParam
+          ? modulesParam.split(",").map((s) => s.trim()).filter(Boolean)
+          : [];
+        let moduleSources;
+        if (moduleNames.length > 0) {
+          const sources = {};
+          for (const fileName of moduleNames) {
+            const text = await (await fetch(`real/${fileName}`)).text();
+            sources[fileName] = text;
+            sources[`./${fileName}`] = text;
+          }
+          moduleSources = sources;
+          console.log(
+            `HARNESS REAL modules: loaded ${moduleNames.join(", ")} as moduleSources`,
+          );
+        }
+
+        const t0 = performance.now();
+        const doc = await window.extractDocument(html, `Real ${name} fixture`, {
+          viewportWidth: 1440,
+          extraCss,
+          moduleSources,
+        });
+        const elapsedMs = performance.now() - t0;
+        console.log(`HARNESS REAL extracted in ${elapsedMs.toFixed(1)}ms`);
+
+        // --- Single walk over the tree, collecting every stat at once ------
+        let totalNodes = 0;
+        let maxDepth = 0;
+        const kindCounts = { FRAME: 0, TEXT: 0, IMAGE: 0, VECTOR: 0 };
+        const layoutSourceCounts = {
+          "explicit-flex": 0,
+          "explicit-grid": 0,
+          "inferred-stack": 0,
+        };
+        let absoluteFrames = 0;
+        let boundTokenNodes = 0;
+        // Fix (C): TEXT nodes whose characters are still a literal `{{ }}`
+        // placeholder — i.e. content that needed Claude Design's runtime and
+        // did not render. Quantifies "how much of the import is meaningful".
+        let placeholderTextNodes = 0;
+
+        // Distinct colours actually used in the document (as SOLID paints on
+        // fills, borders, or text runs) that did NOT bind to any token. A
+        // large count here is the signal that the token table is wrong (or
+        // empty) for this surface, not merely that a few one-off colours slipped
+        // through. Keyed by rounded hex + alpha so near-identical antialiasing
+        // noise doesn't inflate the distinct count.
+        const unmatchedColors = new Map(); // hex -> count
+
+        const colorHex = (c) => {
+          const toHex = (n) => Math.round(Math.max(0, Math.min(1, n)) * 255)
+            .toString(16)
+            .padStart(2, "0");
+          const base = `#${toHex(c.r)}${toHex(c.g)}${toHex(c.b)}`.toUpperCase();
+          return c.a < 1 ? `${base} @ ${c.a.toFixed(2)}a` : base;
+        };
+
+        const trackPaint = (paint) => {
+          if (!paint || paint.type !== "SOLID" || paint.token) return;
+          const hex = colorHex(paint.color);
+          unmatchedColors.set(hex, (unmatchedColors.get(hex) ?? 0) + 1);
+        };
+
+        const nodeHasToken = (node) => {
+          if (node.fills?.some((f) => f.token)) return true;
+          if (node.border?.paint?.token) return true;
+          if (node.cornerToken) return true;
+          if (node.layout?.gapToken) return true;
+          if (node.layout?.paddingTokens && Object.keys(node.layout.paddingTokens).length) {
+            return true;
+          }
+          if (node.text?.styleToken) return true;
+          if (node.text?.runs?.some((r) => r.fill?.token)) return true;
+          return false;
+        };
+
+        const walkStats = (node, depth) => {
+          totalNodes += 1;
+          if (depth > maxDepth) maxDepth = depth;
+          if (node.kind in kindCounts) kindCounts[node.kind] += 1;
+          if (node.kind === "FRAME") {
+            if (node.layout) {
+              if (node.layout.source in layoutSourceCounts) {
+                layoutSourceCounts[node.layout.source] += 1;
+              }
+            } else {
+              absoluteFrames += 1;
+            }
+          }
+          if (nodeHasToken(node)) boundTokenNodes += 1;
+          if (node.kind === "TEXT" && node.text?.characters?.includes("{{")) {
+            placeholderTextNodes += 1;
+          }
+          for (const fill of node.fills || []) trackPaint(fill);
+          if (node.border?.paint) trackPaint(node.border.paint);
+          for (const run of node.text?.runs || []) trackPaint(run.fill);
+          for (const child of node.children || []) walkStats(child, depth + 1);
+        };
+        walkStats(doc.root, 1);
+
+        const tokenCount = doc.designSystem?.tokens?.length ?? 0;
+        const warnings = doc.warnings || [];
+        const missingStylesheets = doc.missingStylesheets || [];
+
+        const captureName = `real-${name}${withDs ? "-ds" : ""}`;
+        const captureResult = await capture(captureName, doc);
+
+        const unmatchedSorted = [...unmatchedColors.entries()].sort((a, b) => b[1] - a[1]);
+
+        // Ground-truth check: optional `?expect=a|b|c` PIPE-separated list of
+        // strings that should appear somewhere in the extracted TEXT once
+        // real data (not a chrome-only/loading render) made it in — useful
+        // for verifying a boot-phase fixture against values known from the
+        // live page, without hardcoding any fixture's actual content into
+        // the harness. Pipe-separated (not comma) since real values often
+        // contain commas themselves (e.g. "6,017"). Collected by
+        // concatenating every TEXT node's characters and checking
+        // inclusion, not exact node identity.
+        const expectParam = params.get("expect");
+        const groundTruthLines = [];
+        if (expectParam) {
+          const expected = expectParam.split("|").map((s) => s.trim()).filter(Boolean);
+          let allText = "";
+          const collectText = (n) => {
+            if (n.kind === "TEXT" && n.text?.characters) allText += n.text.characters + "\n";
+            for (const c of n.children || []) collectText(c);
+          };
+          collectText(doc.root);
+          groundTruthLines.push("--- ground-truth check ---");
+          for (const needle of expected) {
+            groundTruthLines.push(`${allText.includes(needle) ? "PRESENT" : "MISSING"} — "${needle}"`);
+          }
+        }
+
+        const lines = [];
+        lines.push(`extraction time: ${elapsedMs.toFixed(1)} ms`);
+        lines.push(`total nodes: ${totalNodes}`);
+        lines.push(`max tree depth: ${maxDepth}`);
+        lines.push(
+          `count by kind: FRAME=${kindCounts.FRAME} TEXT=${kindCounts.TEXT} IMAGE=${kindCounts.IMAGE} VECTOR=${kindCounts.VECTOR}`,
+        );
+        lines.push(`design-system tokens found: ${tokenCount}`);
+        // Fix (C): markup that needed Claude Design's runtime (support.js) and
+        // therefore did not render once scripts were stripped. Non-zero here
+        // is what makes main.ts warn the user instead of silently importing
+        // placeholder boxes.
+        lines.push(
+          `dynamicContent: placeholders=${doc.dynamicContent.placeholders} loops=${doc.dynamicContent.loops} components=${doc.dynamicContent.components}`,
+        );
+        // Boot-phase report (src/ui/resolve.ts's ResolveReport): did a
+        // componentDidMount run, how many setState calls resulted, and which
+        // sibling modules loaded vs were missing.
+        const resolved = doc.dynamicContent.resolved || {};
+        lines.push(
+          `boot: ran=${!!resolved.ran} bootRan=${!!resolved.bootRan} setStateCalls=${resolved.setStateCalls ?? 0} ` +
+            `modulesLoaded=${JSON.stringify(resolved.modulesLoaded ?? [])} modulesMissing=${JSON.stringify(resolved.modulesMissing ?? [])} ` +
+            `importImpl=${resolved.importImpl ?? "(none)"} error=${resolved.error ?? "(none)"}`,
+        );
+        lines.push(
+          `TEXT nodes carrying a literal {{ }} placeholder (unresolved): ${placeholderTextNodes} / ${kindCounts.TEXT} TEXT nodes`,
+        );
+        lines.push(
+          `auto-layout frames: explicit-flex=${layoutSourceCounts["explicit-flex"]} explicit-grid=${layoutSourceCounts["explicit-grid"]} inferred-stack=${layoutSourceCounts["inferred-stack"]}`,
+        );
+        lines.push(`absolute frames: ${absoluteFrames}`);
+        lines.push(`nodes with a bound token: ${boundTokenNodes}`);
+        lines.push(
+          `capture: ${captureResult.ok ? `OK (${captureResult.bytes} bytes to /capture/${captureName})` : `FAILED — ${captureResult.error}`}`,
+        );
+        lines.push(`warnings: ${warnings.length} total (first 20 below)`);
+        warnings.slice(0, 20).forEach((w, i) => lines.push(`  ${i + 1}. ${w}`));
+        if (warnings.length === 0) lines.push("  (none)");
+        lines.push(`missingStylesheets empty: ${missingStylesheets.length === 0}`);
+        if (missingStylesheets.length > 0) {
+          missingStylesheets.forEach((href, i) => lines.push(`  missing ${i + 1}. ${href}`));
+        }
+        lines.push(
+          `distinct colours with NO token match: ${unmatchedSorted.length} (sample up to 15 below, by usage count)`,
+        );
+        unmatchedSorted.slice(0, 15).forEach(([hex, count], i) => lines.push(`  ${i + 1}. ${hex} — used ${count}x`));
+        if (unmatchedSorted.length === 0) lines.push("  (none — every colour used matched a token)");
+        lines.push(...groundTruthLines);
+
+        document.getElementById("results").innerHTML =
+          `<h2>Real ${name}${withDs ? " + design system (ds=1)" : ""} fixture — measurement</h2><pre id="real-stats">${lines
+            .join("\n")
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")}</pre>`;
+        document.getElementById("tree").textContent = outline(doc.root);
+
+        console.log("HARNESS REAL DONE");
+        for (const line of lines) console.log(`HARNESS REAL :: ${line}`);
+      }
+
+      // -----------------------------------------------------------------
+      // Default run — the 36-assertion fixture suite. Unchanged behaviour.
+      // -----------------------------------------------------------------
+      async function runDefault() {
+        console.log("HARNESS start");
+        const html = await (await fetch("screen.html")).text();
+        console.log(`HARNESS fetched ${html.length} bytes`);
+        const doc = await window.extractDocument(html, "Fixture screen", {
+          viewportWidth: 1200,
+        });
+
+        // --- Design system -------------------------------------------------
+        const tokens = doc.designSystem?.tokens ?? [];
+        check("design system detected", tokens.length > 0, `${tokens.length} tokens`);
+
+        const primary = tokens.find((t) => t.name === "primary");
+        check(
+          "semantic token resolves through its alias",
+          primary && primary.aliasOf === "acme-green-700",
+          primary ? `primary -> ${primary.aliasOf}` : "primary missing",
+        );
+        check(
+          "resolved value follows the var chain",
+          primary && primary.resolved.toUpperCase() === "#1B6F58",
+          primary?.resolved,
+        );
+        check(
+          "non-token values (gradients) excluded from the token list",
+          !tokens.some((t) => t.name === "acme-gradient"),
+        );
+        check(
+          "spacing tokens become FLOAT",
+          tokens.some((t) => t.name === "space-6" && t.kind === "FLOAT" && t.float === 24),
+        );
+        check(
+          "ramp names become variable groups",
+          tokens.some((t) => t.path === "color/acme-green/700"),
+          tokens.find((t) => t.name === "acme-green-700")?.path,
+        );
+
+        // --- Layout inference ----------------------------------------------
+        const header = findByName(doc.root, "Header");
+        check("explicit flex becomes auto-layout", header?.layout?.source === "explicit-flex");
+        check("flex gap read correctly", header?.layout?.gap === 24, String(header?.layout?.gap));
+        check(
+          "space-between preserved",
+          header?.layout?.primaryAlign === "SPACE_BETWEEN",
+          header?.layout?.primaryAlign,
+        );
+        check(
+          "padding read from computed style",
+          header?.layout?.padding.top === 24 && header?.layout?.padding.left === 24,
+        );
+
+        const even = findByName(doc.root, "Even stack");
+        check(
+          "even block stack is inferred as auto-layout",
+          even?.layout?.source === "inferred-stack" && even?.layout?.mode === "VERTICAL",
+          even?.layout ? `${even.layout.mode} gap:${even.layout.gap}` : "no layout",
+        );
+        check(
+          "inferred gap snaps through sub-pixel noise to the authored 12px",
+          even?.layout?.gap === 12,
+          String(even?.layout?.gap),
+        );
+
+        // The board is the outermost inferred stack, and it regressed to
+        // absolute once when a change to text geometry shifted sibling gaps —
+        // with every other assertion still green. Pin it.
+        const board = findByName(doc.root, "Board");
+        check(
+          "the outer board stays an inferred vertical stack",
+          board?.layout?.source === "inferred-stack" && board?.layout?.mode === "VERTICAL",
+          board?.layout ? `${board.layout.source}/${board.layout.mode}` : "no layout",
+        );
+        check(
+          "body text keeps its line-box height, not the tighter glyph box",
+          (() => {
+            let hit = null;
+            const scan = (n) => {
+              if (n.kind === "TEXT" && n.text.characters.startsWith("Revenue rose")) hit = n;
+              (n.children || []).forEach(scan);
+            };
+            scan(doc.root);
+            // 15px text at line-height 1.55 is ~23px; the glyph box alone is ~17.
+            return hit ? hit.height >= 21 : false;
+          })(),
+        );
+
+        const uneven = findByName(doc.root, "Uneven stack");
+        check(
+          "uneven stack is left absolute (no false auto-layout)",
+          uneven && !uneven.layout,
+          uneven?.layout ? `wrongly got ${uneven.layout.source}` : "absolute",
+        );
+
+        // --- Token binding --------------------------------------------------
+        const headerFill = header?.fills?.[0];
+        check(
+          "var() background binds by name",
+          headerFill?.token?.via === "var" && headerFill?.token?.name === "card",
+          headerFill?.token ? `${headerFill.token.name} via ${headerFill.token.via}` : "unbound",
+        );
+        check(
+          "border colour binds to the border token",
+          header?.border?.paint.token?.name === "border",
+          header?.border?.paint.token?.name,
+        );
+        check(
+          "literal hex reverse-matches to a primitive token",
+          (() => {
+            const button = header && findByName(header, "Button");
+            return button?.fills?.[0]?.token?.name === "acme-green-700";
+          })(),
+        );
+        check(
+          "radius binds to a radius token, not a same-valued spacing token",
+          header?.cornerToken?.name === "radius-lg",
+          header?.cornerToken?.name,
+        );
+        check(
+          "gap still binds to a spacing token",
+          header?.layout?.gapToken?.name === "space-6",
+          header?.layout?.gapToken?.name,
+        );
+
+        // --- Text ------------------------------------------------------------
+        const text = findByName(doc.root, "Mixed text") ?? (() => {
+          let hit = null;
+          const scan = (n) => {
+            if (n.kind === "TEXT" && n.text.characters.includes("Revenue rose")) hit = n;
+            (n.children || []).forEach(scan);
+          };
+          scan(doc.root);
+          return hit;
+        })();
+        check("mixed inline text becomes one TEXT node", text?.kind === "TEXT");
+        check(
+          "inline styles split into separate runs",
+          (text?.text.runs.length ?? 0) >= 4,
+          `${text?.text.runs.length} runs`,
+        );
+        check(
+          "bold run keeps its weight and colour",
+          text?.text.runs.some((r) => r.fontWeight === 700 && r.fill.token?.name === "acme-green-700"),
+        );
+        check(
+          "italic run detected",
+          text?.text.runs.some((r) => r.italic === true),
+        );
+        check(
+          "link run carries href and underline",
+          text?.text.runs.some((r) => r.href === "https://example.com/filing" && r.decoration === "UNDERLINE"),
+        );
+        check(
+          "whitespace collapsed like the browser does",
+          text && !/\s{2,}/.test(text.text.characters),
+          JSON.stringify(text?.text.characters?.slice(0, 60)),
+        );
+
+        // --- Paint / effects --------------------------------------------------
+        const gradient = findByName(doc.root, "Gradient card");
+        const gradientFill = gradient?.fills?.find((f) => f.type === "GRADIENT_LINEAR");
+        check("linear-gradient parsed", !!gradientFill, gradientFill ? `${gradientFill.stops.length} stops @ ${gradientFill.angle}deg` : "missing");
+        check("gradient angle preserved", gradientFill?.angle === 180, String(gradientFill?.angle));
+
+        check(
+          "box-shadow parsed with spread",
+          header?.effects?.some((e) => e.type === "DROP_SHADOW" && e.offsetY === 24 && e.spread === -28),
+          JSON.stringify(header?.effects?.[0]),
+        );
+
+        const uppercase = gradient && findByName(gradient, "Reading key");
+        check(
+          "text-transform captured as textCase",
+          (() => {
+            let hit = null;
+            const scan = (n) => {
+              if (n.kind === "TEXT" && n.text.characters === "Reading key") hit = n;
+              (n.children || []).forEach(scan);
+            };
+            scan(doc.root);
+            return hit?.text.runs[0]?.textCase === "UPPER";
+          })(),
+        );
+
+        const sideBorder = findByName(doc.root, "Side border");
+        check(
+          "per-side border weights preserved",
+          sideBorder?.border?.weights.left === 3 && sideBorder?.border?.weights.top === 0,
+          JSON.stringify(sideBorder?.border?.weights),
+        );
+        check("dashed border detected", sideBorder?.border?.dashed === true);
+
+        let svgFound = false;
+        const scanSvg = (n) => {
+          if (n.kind === "VECTOR") svgFound = true;
+          (n.children || []).forEach(scanSvg);
+        };
+        scanSvg(doc.root);
+        check("inline SVG captured as vector", svgFound);
+
+        check(
+          "a complete file reports no missing stylesheets",
+          doc.missingStylesheets.length === 0,
+          JSON.stringify(doc.missingStylesheets),
+        );
+
+        // --- Missing design system (the common public case) -------------------
+        // Claude Design downloads one file at a time, so the usual drop is a
+        // lone .dc.html still linking _ds token CSS the user does not have.
+        const orphaned = html.replace(
+          'href="tokens.css"',
+          'href="_ds/absent-design-system-9f2a1c04-b7e3/tokens/colors.css"',
+        );
+        const orphanDoc = await window.extractDocument(orphaned, "Orphaned", {
+          viewportWidth: 1200,
+        });
+
+        check(
+          "missing _ds stylesheet is detected and named",
+          orphanDoc.missingStylesheets.some((href) => href.includes("_ds/")),
+          JSON.stringify(orphanDoc.missingStylesheets),
+        );
+        check(
+          "no design system is reported when its CSS is absent",
+          !orphanDoc.designSystem,
+          orphanDoc.designSystem ? `${orphanDoc.designSystem.tokens.length} tokens leaked` : "none",
+        );
+        check(
+          "layout still imports without the design system",
+          !!findByName(orphanDoc.root, "Header")?.layout,
+        );
+        check(
+          "colours fall back to literals, not to stale tokens",
+          (() => {
+            const header = findByName(orphanDoc.root, "Header");
+            if (!header) return false;
+            // An unresolvable var() computes to transparent, so no fill is the
+            // correct outcome; what matters is that nothing claims a token.
+            return header.fills.every((fill) => !fill.token);
+          })(),
+        );
+
+        // --- Scoped-surface token collision (fix B) -----------------------------
+        // A Claude Design system can re-theme the same custom-property name
+        // under a scoped selector (e.g. `.acme-deck` redefining --background).
+        // tokens.ts only indexes the global :root layer, so a name match alone
+        // would wrongly bind to the :root definition even where the scoped
+        // value visibly rendered. matchTokenByVar rejects a name match whose
+        // colour disagrees with what actually rendered and falls back to a
+        // value match instead (test/fixture/scoped.html).
+        const scopedHtml = await (await fetch("scoped.html")).text();
+        const scopedDoc = await window.extractDocument(scopedHtml, "Scoped surface", {
+          viewportWidth: 400,
+        });
+        const scopedFill = findByName(scopedDoc.root, "Scoped fill");
+        const scopedColorHex = (c) => {
+          const toHex = (n) =>
+            Math.round(Math.max(0, Math.min(1, n)) * 255)
+              .toString(16)
+              .padStart(2, "0");
+          return `#${toHex(c.r)}${toHex(c.g)}${toHex(c.b)}`.toUpperCase();
+        };
+        const scopedRenderedHex = scopedFill?.fills?.[0]?.color
+          ? scopedColorHex(scopedFill.fills[0].color)
+          : undefined;
+        check(
+          "scoped surface renders the .acme-deck override, not the :root value",
+          scopedRenderedHex === "#FBFCFC",
+          `rendered ${scopedRenderedHex}`,
+        );
+        const scopedToken = scopedFill?.fills?.[0]?.token;
+        check(
+          "scoped surface's fill token is NOT the :root background token bound to #FFFFFF",
+          !(scopedToken && scopedToken.name === "background" && scopedToken.via === "var"),
+          scopedToken
+            ? `token: ${scopedToken.name} via ${scopedToken.via}`
+            : "token: undefined (no value-match candidate for #FBFCFC in this fixture's token table)",
+        );
+
+        // --- _ds_manifest.json: surfaces, annotations, build paths -----------
+        // The manifest is the only place a token's per-surface values and its
+        // `@kind other` annotation are written down: the surface CSS is never
+        // loaded (it contributes zero tokens and would change measurement), and
+        // CSSOM strips the comment the annotation lives in.
+        const scopedManifest = JSON.stringify({
+          namespace: "ScopedFixture_a1b2c3",
+          themes: [{ selector: ".acme-deck", label: "Fixture Deck" }],
+          tokens: [
+            { name: "--background", value: "#FFFFFF", kind: "color" },
+            { name: "--neutral-0", value: "#FFFFFF", kind: "color" },
+            { name: "--dur-fast", value: "150ms", kind: "other", annotation: "other" },
+            { name: "--shadow-md", value: "0 10px 15px -3px rgba(0,0,0,0.1)", kind: "shadow" },
+            { name: "--background", value: "#FBFCFC", kind: "color", scope: ".acme-deck" },
+            { name: "--ink-500", value: "#333333", kind: "color", scope: ".acme-deck" },
+          ],
+        });
+        const manifestDoc = await window.extractDocument(scopedHtml, "Scoped surface", {
+          viewportWidth: 400,
+          dsManifest: scopedManifest,
+        });
+        const manifestTokens = manifestDoc.designSystem?.tokens ?? [];
+        const byTokenName = new Map(manifestTokens.map((t) => [t.name, t]));
+        const plainTokens = scopedDoc.designSystem?.tokens ?? [];
+
+        // The load-bearing one. matchTokenByVar rejects a name match whose
+        // colour disagrees with what rendered, and that guard only works while
+        // the index holds the :root layer alone. Feed the deck's #FBFCFC into
+        // it under the name "background" and the guard inverts: the name match
+        // now agrees with the rendered colour, and deck's value starts binding
+        // onto product-surface elements everywhere.
+        const manifestFill = findByName(manifestDoc.root, "Scoped fill");
+        const manifestToken = manifestFill?.fills?.[0]?.token;
+        const background = byTokenName.get("background");
+        check(
+          "reading the manifest does not put a surface's value in the base token index",
+          !(manifestToken && manifestToken.name === "background" && manifestToken.via === "var") &&
+            background?.resolved?.toUpperCase() === "#FFFFFF" &&
+            background?.bySurface?.[".acme-deck"]?.resolved?.toUpperCase() === "#FBFCFC",
+          `token=${manifestToken ? `${manifestToken.name} via ${manifestToken.via}` : "undefined"} ` +
+            `base=${background?.resolved} deck=${background?.bySurface?.[".acme-deck"]?.resolved}`,
+        );
+        check(
+          "a token annotated @kind other is dropped even though its shape passes",
+          !byTokenName.has("dur-fast") && plainTokens.some((t) => t.name === "dur-fast"),
+          `with manifest=${byTokenName.has("dur-fast")}, without=${plainTokens.some((t) => t.name === "dur-fast")}`,
+        );
+        check(
+          "buildPath regroups a stranded ramp step while path stays put",
+          byTokenName.get("neutral-0")?.path === "color/neutral-0" &&
+            byTokenName.get("neutral-0")?.buildPath === "color/neutral/0",
+          `path=${byTokenName.get("neutral-0")?.path} buildPath=${byTokenName.get("neutral-0")?.buildPath}`,
+        );
+        check(
+          "surface metadata and shadow tokens reach the IR",
+          manifestDoc.designSystem?.key === "ScopedFixture_a1b2c3" &&
+            manifestDoc.designSystem?.surfaces?.[0]?.label === "Fixture Deck" &&
+            byTokenName.get("ink-500")?.buildPath === "deck/color/ink/500" &&
+            !byTokenName.has("shadow-md") &&
+            manifestDoc.designSystem?.shadows?.[0]?.buildPath === "shadow/md" &&
+            manifestDoc.designSystem?.shadows?.[0]?.layers?.[0]?.blur === 15 &&
+            manifestDoc.designSystem?.shadows?.[0]?.layers?.[0]?.spread === -3,
+          `key=${manifestDoc.designSystem?.key} ink=${byTokenName.get("ink-500")?.buildPath} ` +
+            `shadows=${JSON.stringify(manifestDoc.designSystem?.shadows)}`,
+        );
+
+        // --- Document-declared theme axis (test/fixture/theme-axis.html) -------
+        // A Claude Design document routinely ships its whole theme as two
+        // class-scoped blocks and no :root at all. Before this, collectFromRules
+        // lifted only the global layer, so all of it was invisible and every
+        // themed fill imported as raw hex while the summary still reported a
+        // healthy variable count. That is why the assertions below are about
+        // WHICH VARIABLE a node binds to, never about how many were made.
+        const axisHtml = await (await fetch("theme-axis.html")).text();
+        const axisDoc = await window.extractDocument(axisHtml, "Theme axis", {
+          viewportWidth: 400,
+        });
+        const axisTokens = axisDoc.designSystem?.tokens ?? [];
+        const axisByName = new Map(axisTokens.map((t) => [t.name, t]));
+        const LIGHT = ".dv-theme-light";
+        const DARK = ".dv-theme-dark";
+
+        const muted = axisByName.get("dv-muted");
+        check(
+          "a document's own light/dark blocks reach the token table with both values",
+          axisTokens.length === 4 &&
+            !!muted &&
+            muted.bySurface?.[LIGHT]?.resolved === "#b3b3b3" &&
+            muted.bySurface?.[DARK]?.resolved === "#7e7e7e" &&
+            // No :root, so the base layer is the first theme's values. That is
+            // what lets the light half still bind when the file's plan allows
+            // exactly one mode.
+            muted.resolved === "#b3b3b3",
+          `tokens=${axisTokens.map((t) => t.name).join(",")} muted=${JSON.stringify(muted?.bySurface)}`,
+        );
+
+        check(
+          "the two themes become modes named from the selectors, common prefix stripped",
+          JSON.stringify(axisDoc.designSystem?.surfaces) ===
+            JSON.stringify([
+              { selector: LIGHT, label: "Light" },
+              { selector: DARK, label: "Dark" },
+            ]),
+          JSON.stringify(axisDoc.designSystem?.surfaces),
+        );
+
+        // Which of those surfaces the DOCUMENT declares, carried across the
+        // boundary because the sandbox cannot recover it. A manifest surface
+        // and a document axis leave the same shape in `declaredIn` (several
+        // scopes, no :root), and only the axis has layers sitting inside it, so
+        // Map mode has to be able to tell them apart: it gives the overflow
+        // collection modes for one and must not for the other.
+        check(
+          "the document's own axis is named in the IR, and a manifest surface is not",
+          JSON.stringify(axisDoc.designSystem?.axis) === JSON.stringify([LIGHT, DARK]) &&
+            manifestDoc.designSystem?.axis === undefined &&
+            (manifestDoc.designSystem?.surfaces?.length ?? 0) > 0,
+          `axis=${JSON.stringify(axisDoc.designSystem?.axis)} ` +
+            `manifestAxis=${JSON.stringify(manifestDoc.designSystem?.axis)} ` +
+            `manifestSurfaces=${JSON.stringify(manifestDoc.designSystem?.surfaces)}`,
+        );
+
+        // The load-bearing one, and the assertion that would have caught the
+        // bug. Both labels have to reach the SAME variable, because a mode is
+        // how one variable holds two values. Binding them to two different
+        // tokens, or leaving either as a literal, is the failure being fixed.
+        // Named by their own text: an undecorated <p> imports as a TEXT node,
+        // and a TEXT node is named from its characters, not from data-name.
+        const lightLabel = findByName(axisDoc.root, "Light muted");
+        const darkLabel = findByName(axisDoc.root, "Dark muted");
+        const lightRef = lightLabel?.text?.runs?.[0]?.fill?.token;
+        const darkRef = darkLabel?.text?.runs?.[0]?.fill?.token;
+        const lightHex = lightLabel?.text?.runs?.[0]?.fill?.color
+          ? scopedColorHex(lightLabel.text.runs[0].fill.color)
+          : undefined;
+        const darkHex = darkLabel?.text?.runs?.[0]?.fill?.color
+          ? scopedColorHex(darkLabel.text.runs[0].fill.color)
+          : undefined;
+        check(
+          "a light node and a dark node bind to ONE variable, at their own rendered colours",
+          !!lightRef &&
+            !!darkRef &&
+            lightRef.path === darkRef.path &&
+            lightRef.name === "dv-muted" &&
+            lightHex === "#B3B3B3" &&
+            darkHex === "#7E7E7E",
+          `light=${lightRef?.path}@${lightHex} dark=${darkRef?.path}@${darkHex}`,
+        );
+
+        // Which of the two needs a mode to be correct. The base layer already
+        // holds light's values, so a light binding is safe in any file; a dark
+        // one is only safe inside dark's own mode, and carries the selector so
+        // the builder can refuse it when that mode could not be created.
+        check(
+          "only the theme that differs from the base marks its binding mode-dependent",
+          lightRef?.themeScope === undefined && darkRef?.themeScope === DARK,
+          `light=${lightRef?.themeScope} dark=${darkRef?.themeScope}`,
+        );
+
+        // The mode goes on the outermost frame of the subtree and nowhere else:
+        // Figma resolves modes down the tree, so stamping every descendant
+        // would be hundreds of assignments saying one thing.
+        const darkRoot = findByName(axisDoc.root, "Dark root");
+        const darkPanel = findByName(axisDoc.root, "Dark panel");
+        const lightRoot = findByName(axisDoc.root, "Light root");
+        check(
+          "each themed subtree records its theme once, on its outermost node",
+          lightRoot?.themeScope === LIGHT &&
+            darkRoot?.themeScope === DARK &&
+            darkPanel?.themeScope === undefined &&
+            darkLabel?.themeScope === undefined,
+          `lightRoot=${lightRoot?.themeScope} darkRoot=${darkRoot?.themeScope} ` +
+            `panel=${darkPanel?.themeScope} label=${darkLabel?.themeScope}`,
+        );
+
+        // A colour that arrives as a LITERAL, which is the other half of
+        // matching and the only path the per-theme colour index is on: #7e7e7e
+        // is --dv-muted in dark and nothing at all in light. Matching it
+        // against the base index would answer the dark question with light's
+        // token, or with no token, depending on which way it was wrong.
+        const lightSwatch = findByName(axisDoc.root, "Light swatch");
+        const darkSwatch = findByName(axisDoc.root, "Dark swatch");
+        const unthemedSwatch = findByName(axisDoc.root, "Unthemed swatch");
+        check(
+          "a literal colour value-matches inside its own theme, at that theme's value",
+          darkSwatch?.fills?.[0]?.token?.name === "dv-muted" &&
+            darkSwatch?.fills?.[0]?.token?.via === "value-match" &&
+            darkSwatch?.fills?.[0]?.token?.themeScope === DARK &&
+            lightSwatch?.fills?.[0]?.token?.name === "dv-muted" &&
+            lightSwatch?.fills?.[0]?.token?.themeScope === undefined,
+          `dark=${JSON.stringify(darkSwatch?.fills?.[0]?.token)} light=${JSON.stringify(lightSwatch?.fills?.[0]?.token)}`,
+        );
+
+        // The S7 contract, restated for the new index. byName/byColor/byFloat
+        // are the base layer alone; feed a theme's value into them and
+        // matchTokenByVar's colour guard inverts. The same #7e7e7e that binds
+        // inside dark has to find nothing outside it.
+        check(
+          "a theme's value never leaks into the base colour index",
+          unthemedSwatch?.fills?.[0]?.token === undefined &&
+            unthemedSwatch?.themeScope === undefined,
+          `unthemed=${JSON.stringify(unthemedSwatch?.fills?.[0]?.token)}`,
+        );
+
+        // The fixture's alias pair is deliberately WIDER than its light/dark
+        // pair (five shared names against four), so it outranks the real theme
+        // on the only measure the search sorts by. A non-differing group has to
+        // be out of the running rather than rejected at the end, or this
+        // document loses the theme it actually has.
+        const badgeFill = findByName(axisDoc.root, "Badge fill");
+        const axisSelectors = axisDoc.designSystem?.surfaces?.map((s) => s.selector) ?? [];
+        check(
+          "a wider pair that cannot differ does not outrank, or sink, the real theme",
+          JSON.stringify(axisSelectors) === JSON.stringify([LIGHT, DARK]) &&
+            !axisByName.has("dv-badge-bg") &&
+            !axisByName.has("dv-chip-bg") &&
+            !axisByName.has("dv-alias-bg") &&
+            !badgeFill?.fills?.[0]?.token &&
+            badgeFill?.themeScope === undefined,
+          `surfaces=${JSON.stringify(axisSelectors)} ` +
+            `chip=${axisByName.has("dv-chip-bg")} alias=${axisByName.has("dv-alias-bg")} ` +
+            `badgeToken=${JSON.stringify(badgeFill?.fills?.[0]?.token)}`,
+        );
+
+        // Every near-miss shape on its own, with no real theme to be preferred
+        // over. One block has no second value for a mode to hold; a pair
+        // sharing one name is a component variant; a pair sharing every value
+        // is an alias. Modes called "Badge", or "Ok" and "Bad", on a colour
+        // collection are worse than the literals this file should produce.
+        const noneHtml = await (await fetch("theme-axis-none.html")).text();
+        const noneDoc = await window.extractDocument(noneHtml, "No axis", {
+          viewportWidth: 400,
+        });
+        const noneNames = (noneDoc.designSystem?.tokens ?? []).map((t) => t.name);
+        const scopedNodes = [];
+        (function collectScopes(node) {
+          if (node.themeScope) scopedNodes.push(`${node.name}:${node.themeScope}`);
+          for (const child of node.children || []) collectScopes(child);
+        })(noneDoc.root);
+        check(
+          "none of the three near-miss shapes becomes a mode on its own either",
+          noneDoc.designSystem?.surfaces === undefined &&
+            scopedNodes.length === 0 &&
+            // The :root layer still works exactly as it did.
+            JSON.stringify(noneNames) === JSON.stringify(["nv-bg", "nv-text"]) &&
+            findByName(noneDoc.root, "Base fill")?.fills?.[0]?.token?.name === "nv-bg" &&
+            !findByName(noneDoc.root, "Chip ok")?.fills?.[0]?.token &&
+            !findByName(noneDoc.root, "Alias a")?.fills?.[0]?.token,
+          `surfaces=${JSON.stringify(noneDoc.designSystem?.surfaces)} tokens=${JSON.stringify(noneNames)} ` +
+            `scoped=${JSON.stringify(scopedNodes)}`,
+        );
+
+        // --- Root re-themes (test/fixture/theme-root*.html) --------------------
+        // Claude Design's default theme shape since September 2026: light on
+        // :root, dark on :root[data-theme="dark"], switched by the document's
+        // own script. Nothing in it is a class a subtree carries, so the class
+        // axis above never saw it and a real export bound 0 of 84 layers.
+        const RT_DARK = ':root[data-theme="dark"]';
+        const rootHtml = await (await fetch("theme-root.dc.html")).text();
+        const rootLight = await window.extractDocument(rootHtml, "Root light", { viewportWidth: 400 });
+        const rtTokens = new Map((rootLight.designSystem?.tokens ?? []).map((t) => [t.name, t]));
+        check(
+          "a :root[data-theme] block becomes a Dark mode beside a Light base, base values intact",
+          JSON.stringify(rootLight.designSystem?.surfaces) ===
+            JSON.stringify([{ selector: RT_DARK, label: "Dark" }]) &&
+            JSON.stringify(rootLight.designSystem?.axis) === JSON.stringify([RT_DARK]) &&
+            rootLight.designSystem?.baseModeLabel === "Light" &&
+            rtTokens.get("rt-ink")?.resolved === "rgb(35, 37, 35)" &&
+            rtTokens.get("rt-ink")?.bySurface?.[RT_DARK]?.resolved === "rgb(240, 240, 233)",
+          `surfaces=${JSON.stringify(rootLight.designSystem?.surfaces)} base=${rootLight.designSystem?.baseModeLabel} ` +
+            `ink=${JSON.stringify(rtTokens.get("rt-ink"))}`,
+        );
+        check(
+          "rendered in the base theme, layers bind to base tokens and the root carries no mode",
+          rootLight.root.themeScope === undefined &&
+            findByName(rootLight.root, "Accent swatch")?.fills?.[0]?.token?.name === "rt-accent" &&
+            findByName(rootLight.root, "Ink swatch")?.fills?.[0]?.token?.name === "rt-ink" &&
+            !findByName(rootLight.root, "Dark literal swatch")?.fills?.[0]?.token &&
+            document.documentElement.getAttribute("data-theme") === null,
+          `scope=${rootLight.root.themeScope} accent=${JSON.stringify(findByName(rootLight.root, "Accent swatch")?.fills?.[0]?.token)}`,
+        );
+
+        // The document's script switches the page to dark, which is what a
+        // "system" default does on a dark OS or in Figma's dark UI.
+        window.__rtApplyTheme = true;
+        let rootDark;
+        try {
+          rootDark = await window.extractDocument(rootHtml, "Root dark", { viewportWidth: 400 });
+        } finally {
+          delete window.__rtApplyTheme;
+        }
+        const darkAccent = findByName(rootDark.root, "Dark literal swatch")?.fills?.[0]?.token;
+        check(
+          "rendered dark, the root frame is put in the Dark mode and literals match dark values",
+          rootDark.root.themeScope === RT_DARK &&
+            darkAccent?.name === "rt-accent" &&
+            darkAccent?.via === "value-match" &&
+            darkAccent?.themeScope === RT_DARK &&
+            findByName(rootDark.root, "Line swatch")?.fills?.[0]?.token?.name === "rt-line",
+          `scope=${rootDark.root.themeScope} accent=${JSON.stringify(darkAccent)}`,
+        );
+        check(
+          "a document's script setting data-theme on <html> does not outlive its import",
+          document.documentElement.getAttribute("data-theme") === null,
+          `data-theme=${document.documentElement.getAttribute("data-theme")}`,
+        );
+
+        const mediaDoc = await window.extractDocument(
+          await (await fetch("theme-root-media.html")).text(),
+          "Root media",
+          { viewportWidth: 400 },
+        );
+        const msInk = (mediaDoc.designSystem?.tokens ?? []).find((t) => t.name === "ms-ink");
+        check(
+          "a prefers-color-scheme :root is a Dark mode, and no longer overwrites the base layer",
+          msInk?.resolved === "#1e1e1e" &&
+            msInk?.bySurface?.["@media (prefers-color-scheme: dark)"]?.resolved === "#ffffff" &&
+            mediaDoc.designSystem?.baseModeLabel === "Light",
+          `ink=${JSON.stringify(msInk)} surfaces=${JSON.stringify(mediaDoc.designSystem?.surfaces)}`,
+        );
+
+        const pairDoc = await window.extractDocument(
+          await (await fetch("theme-root-pair.html")).text(),
+          "Root pair",
+          { viewportWidth: 400 },
+        );
+        check(
+          "two attribute themes with no base layer become two modes, base holding the first",
+          JSON.stringify(pairDoc.designSystem?.surfaces) ===
+            JSON.stringify([
+              { selector: ':root[data-look="paper"]', label: "Paper" },
+              { selector: ':root[data-look="ink"]', label: "Ink" },
+            ]) &&
+            pairDoc.designSystem?.baseModeLabel === undefined &&
+            (pairDoc.designSystem?.tokens ?? []).find((t) => t.name === "lk-bg")?.resolved === "#fbf9f5",
+          `surfaces=${JSON.stringify(pairDoc.designSystem?.surfaces)}`,
+        );
+
+        // --- Two screens of one export that disagree (divergent-a/b.html) ------
+        // The premise the sandbox half of this story rests on, measured rather
+        // than assumed: two Claude Design documents can declare one token name
+        // at two values, and the extractor gives both the SAME token path, so a
+        // batch merge has to pick one. It picks the first, and the screen it
+        // did not pick must then not bind to it (scenario S, test/e2e/run.ts).
+        // Asserted here because that scenario hand-writes this shape, and a
+        // hand-written shape the extractor does not actually produce is a test
+        // of nothing.
+        const divergentA = await window.extractDocument(
+          await (await fetch("divergent-a.html")).text(),
+          "Screen A",
+          { viewportWidth: 400 },
+        );
+        const divergentB = await window.extractDocument(
+          await (await fetch("divergent-b.html")).text(),
+          "Screen B",
+          { viewportWidth: 400 },
+        );
+        const DX_LIGHT = ".dx-theme-light";
+        const DX_DARK = ".dx-theme-dark";
+        const dxToken = (doc, name) =>
+          (doc.designSystem?.tokens ?? []).find((t) => t.name === name);
+        const dxAMuted = dxToken(divergentA, "dx-muted");
+        const dxBMuted = dxToken(divergentB, "dx-muted");
+        const dxALine = dxToken(divergentA, "dx-line");
+        const dxBLine = dxToken(divergentB, "dx-line");
+        const dxASurface = dxToken(divergentA, "dx-surface");
+        const dxBSurface = dxToken(divergentB, "dx-surface");
+        check(
+          "two screens of one export can declare one token name at two values",
+          // One path on both sides means one entry in the merged system, one
+          // variable, and only one of these two values inside it.
+          !!dxAMuted &&
+            dxAMuted.path === dxBMuted?.path &&
+            dxAMuted.bySurface?.[DX_LIGHT]?.resolved === "#767676" &&
+            dxBMuted.bySurface?.[DX_LIGHT]?.resolved === "#757575" &&
+            dxAMuted.bySurface?.[DX_DARK]?.resolved === "#7e7e7e" &&
+            dxBMuted.bySurface?.[DX_DARK]?.resolved === "#7a7a7a" &&
+            // And the two shapes a per-mode answer has to tell apart: one name
+            // the screens agree on everywhere, and one they agree on in light
+            // and differ on in dark.
+            dxASurface?.bySurface?.[DX_DARK]?.resolved ===
+              dxBSurface?.bySurface?.[DX_DARK]?.resolved &&
+            dxALine?.bySurface?.[DX_LIGHT]?.resolved ===
+              dxBLine?.bySurface?.[DX_LIGHT]?.resolved &&
+            dxALine?.bySurface?.[DX_DARK]?.resolved !==
+              dxBLine?.bySurface?.[DX_DARK]?.resolved,
+          `muted A=${JSON.stringify(dxAMuted?.bySurface)} B=${JSON.stringify(dxBMuted?.bySurface)} ` +
+            `line A=${JSON.stringify(dxALine?.bySurface)} B=${JSON.stringify(dxBLine?.bySurface)}`,
+        );
+
+        // What the builder is handed for each of those layers. B's light label
+        // renders #757575 and names the same path A's does, so the ref alone
+        // cannot say which screen's colour is behind it. That is why the
+        // divergence is carried per document rather than stamped on the ref.
+        const dxALightLabel = findByName(divergentA.root, "A light muted");
+        const dxBLightLabel = findByName(divergentB.root, "B light muted");
+        const dxALightRef = dxALightLabel?.text?.runs?.[0]?.fill?.token;
+        const dxBLightRef = dxBLightLabel?.text?.runs?.[0]?.fill?.token;
+        const dxAHex = dxALightLabel
+          ? scopedColorHex(dxALightLabel.text.runs[0].fill.color)
+          : undefined;
+        const dxBHex = dxBLightLabel
+          ? scopedColorHex(dxBLightLabel.text.runs[0].fill.color)
+          : undefined;
+        check(
+          "both screens' layers reference that one path, at their own rendered colours",
+          !!dxALightRef &&
+            dxALightRef.path === dxBLightRef?.path &&
+            dxAHex === "#767676" &&
+            dxBHex === "#757575",
+          `A=${dxALightRef?.path}@${dxAHex} B=${dxBLightRef?.path}@${dxBHex}`,
+        );
+
+        // --- Deck detection: one Figma frame per slide (test/fixture/deck-mini.html) ---
+        // Mirrors a real Claude Design deck export: <deck-stage> wrapping
+        // <section data-label="…" data-speaker-notes="…"> slides that would
+        // otherwise land as one tall stack (normal block flow).
+        const deckHtml = await (await fetch("deck-mini.html")).text();
+        const deckDoc = await window.extractDocument(deckHtml, "Deck mini fixture", {
+          viewportWidth: 400,
+        });
+        check(
+          "deck-stage export detected: one top-level Figma frame per slide",
+          deckDoc.root.children.length === 3,
+          `${deckDoc.root.children.length} top-level children`,
+        );
+        check(
+          "slide named from data-label, short speaker note kept in the name",
+          deckDoc.root.children[0]?.name === "Intro · Short note",
+          deckDoc.root.children[0]?.name,
+        );
+        check(
+          "slide keeps its label alone when speaker notes are too long to include",
+          deckDoc.root.children[1]?.name === "Middle",
+          deckDoc.root.children[1]?.name,
+        );
+        check(
+          "long speaker notes are dropped with a warning instead of silently truncated",
+          deckDoc.warnings.some(
+            (w) => w.includes("Middle") && w.toLowerCase().includes("speaker notes"),
+          ),
+          JSON.stringify(deckDoc.warnings),
+        );
+        check(
+          "slide with no data-label falls back to Slide N",
+          deckDoc.root.children[2]?.name === "Slide 3",
+          deckDoc.root.children[2]?.name,
+        );
+        check(
+          "each slide frame is sized to its own dimensions",
+          deckDoc.root.children.every((c) => c.width === 400 && c.height === 300),
+          JSON.stringify(deckDoc.root.children.map((c) => `${c.width}x${c.height}`)),
+        );
+        check(
+          "slides are laid out left-to-right with a 200px gap between them",
+          deckDoc.root.children[1]?.x === deckDoc.root.children[0].x + deckDoc.root.children[0].width + 200 &&
+            deckDoc.root.children[2]?.x === deckDoc.root.children[1].x + deckDoc.root.children[1].width + 200,
+          JSON.stringify(deckDoc.root.children.map((c) => c.x)),
+        );
+
+        // --- Deck detection without <deck-stage>: editable-template siblings
+        // (test/fixture/deck-sections-mini.html) ---------------------------------
+        // The editable deck template drops the <deck-stage> wrapper entirely and
+        // uses sibling <section class="acme-deck" data-screen-label="…">
+        // elements directly — the second detection path the spec calls for.
+        const deckSectionsHtml = await (await fetch("deck-sections-mini.html")).text();
+        const deckSectionsDoc = await window.extractDocument(
+          deckSectionsHtml,
+          "Deck sections mini fixture",
+          { viewportWidth: 320 },
+        );
+        check(
+          "sibling data-screen-label sections with no <deck-stage> are also detected as a deck",
+          deckSectionsDoc.root.children.length === 2,
+          `${deckSectionsDoc.root.children.length} top-level children`,
+        );
+        check(
+          "slides named from data-screen-label",
+          deckSectionsDoc.root.children[0]?.name === "Cover" &&
+            deckSectionsDoc.root.children[1]?.name === "Details",
+          JSON.stringify(deckSectionsDoc.root.children.map((c) => c.name)),
+        );
+
+        // --- Negative control: deck detection must not false-positive
+        // (test/fixture/deck-negative-mini.html) --------------------------------
+        // Two groups that each fail exactly one criterion: sections with no
+        // data-label/data-screen-label at all (regardless of matching size), and
+        // sections that carry data-label but render at different sizes. Neither
+        // should be mistaken for a deck.
+        const deckNegHtml = await (await fetch("deck-negative-mini.html")).text();
+        const deckNegDoc = await window.extractDocument(deckNegHtml, "Deck negative fixture", {
+          viewportWidth: 700,
+        });
+        check(
+          "sections without data-label/data-screen-label do not trigger deck detection",
+          !!findByName(deckNegDoc.root, "group-no-label"),
+          "expected group-no-label frame in its normal nested position",
+        );
+        check(
+          "same-labelled sections with mismatched sizes do not trigger deck detection",
+          !!findByName(deckNegDoc.root, "group-mismatched-size"),
+          "expected group-mismatched-size frame in its normal nested position",
+        );
+        check(
+          "negative control stays a single top-level frame, not split into slides",
+          deckNegDoc.root.children.length === 1,
+          `${deckNegDoc.root.children.length} top-level children`,
+        );
+        const hasSlideNamedNode = (() => {
+          const scan = (n) => /^Slide \d+$/.test(n.name) || (n.children || []).some(scan);
+          return scan(deckNegDoc.root);
+        })();
+        check(
+          "no node was named 'Slide N' anywhere in the negative control",
+          !hasSlideNamedNode,
+        );
+
+        // --- Homepage-shaped negative control: a document with no deck markup at
+        // all must extract exactly as it did before deck detection existed. This
+        // is the synthetic-suite stand-in for "?real=homepage stays unchanged" --
+        // screen.html has zero <section>/<deck-stage> elements, so every
+        // assertion above this point already proves normal extraction is
+        // untouched; this makes that guarantee explicit rather than incidental.
+        check(
+          "a document with no deck markup (screen.html) is not treated as a deck",
+          !doc.root.children.some((c) => /^Slide \d+$/.test(c.name)),
+          JSON.stringify(doc.root.children.map((c) => c.name)),
+        );
+
+        // --- Parser hardening: boolean attributes + self-closed import tags
+        // (test/fixture/boolattr.html) ------------------------------------------
+        // Two src/ui/resolve.ts bugs that share a symptom: the import succeeds,
+        // every counter reads correct, and the board is wrong. resolveAttributes
+        // always wrote a string, and in HTML a boolean attribute's PRESENCE is
+        // the true state, so `disabled="{{ false }}"` disabled and
+        // `checked="{{ false }}"` ticked -- live in four places in the Portage
+        // export. Separately, only void elements may self-close, so
+        // `<x-import ... />` stayed open and every following sibling parsed as
+        // its child. The IR carries no attributes, so each case is read back
+        // here as a fill colour (#22AA44 = attribute absent, #CC2222 = present)
+        // or as the presence and depth of a named frame. Each case is paired
+        // with its inverse, because "remove it whenever it is there" passes the
+        // fix case and breaks every genuinely disabled button.
+        const boolHtml = await (await fetch("boolattr.html")).text();
+        const boolDoc = await window.extractDocument(boolHtml, "Boolean attribute fixture", {
+          viewportWidth: 500,
+        });
+        const boolHex = (node) => {
+          const c = node?.fills?.[0]?.color;
+          if (!c) return undefined;
+          const toHex = (n) =>
+            Math.round(Math.max(0, Math.min(1, n)) * 255)
+              .toString(16)
+              .padStart(2, "0");
+          return `#${toHex(c.r)}${toHex(c.g)}${toHex(c.b)}`.toUpperCase();
+        };
+        const childNames = (node) => (node?.children ?? []).map((c) => c.name);
+
+        check(
+          "the boolean-attribute fixture's own script ran and left nothing unresolved",
+          boolDoc.dynamicContent?.resolved?.ran === true &&
+            boolDoc.dynamicContent?.resolved?.placeholdersRemaining === 0 &&
+            boolDoc.dynamicContent?.resolved?.placeholdersResolved === 6,
+          `ran ${boolDoc.dynamicContent?.resolved?.ran}, resolved ${boolDoc.dynamicContent?.resolved?.placeholdersResolved}, remaining ${boolDoc.dynamicContent?.resolved?.placeholdersRemaining}`,
+        );
+        check(
+          "a self-closed <x-import/> does not swallow the sibling written after it",
+          !!findByName(boolDoc.root, "After x-import"),
+          findByName(boolDoc.root, "After x-import")
+            ? "sibling survived"
+            : "sibling was absorbed into the component stub and lost with it",
+        );
+        check(
+          "a self-closed <dc-import/> leaves its following sibling a sibling, not a child",
+          childNames(findByName(boolDoc.root, "Dc import row")).includes("After dc-import"),
+          JSON.stringify(childNames(findByName(boolDoc.root, "Dc import row"))),
+        );
+        check(
+          'disabled="{{ false }}" leaves the button enabled',
+          boolHex(findByName(boolDoc.root, "Enabled import")) === "#22AA44",
+          boolHex(findByName(boolDoc.root, "Enabled import")),
+        );
+        check(
+          'disabled="{{ true }}" still disables the button',
+          boolHex(findByName(boolDoc.root, "Truly disabled import")) === "#CC2222",
+          boolHex(findByName(boolDoc.root, "Truly disabled import")),
+        );
+        check(
+          'checked="{{ false }}" leaves the checkbox unticked',
+          boolHex(findByName(boolDoc.root, "Unticked probe")) === "#22AA44",
+          boolHex(findByName(boolDoc.root, "Unticked probe")),
+        );
+        check(
+          'checked="{{ true }}" still ticks the checkbox',
+          boolHex(findByName(boolDoc.root, "Ticked probe")) === "#CC2222",
+          boolHex(findByName(boolDoc.root, "Ticked probe")),
+        );
+        check(
+          'hidden="{{ false }}" keeps the element in the import',
+          !!findByName(boolDoc.root, "Not hidden"),
+          findByName(boolDoc.root, "Not hidden")
+            ? "present"
+            : "dropped: hidden computed to display:none",
+        );
+        check(
+          'hidden="{{ true }}" still drops the element',
+          !findByName(boolDoc.root, "Truly hidden"),
+          findByName(boolDoc.root, "Truly hidden") ? "wrongly still present" : "absent",
+        );
+
+        // --- Declared props: schema, defaults, overrides, merge order
+        // (test/fixture/props.html) ---------------------------------------------
+        // A document's own `data-props` is the only place a screen says what it
+        // can be parameterised by. Nothing downstream of extractDocument carries
+        // it, so the schema is asserted directly off the markup, and the three
+        // scope layers (state, then props, then renderVals) are read back as
+        // text from three sibling nodes that each read one of them.
+        const propsHtml = await (await fetch("props.html")).text();
+        const propsParsed = new DOMParser().parseFromString(propsHtml, "text/html");
+        const propsSchema = window.readPropsSchema(propsParsed);
+        const textOf = (root, name) => findByName(root, name)?.children?.[0]?.text?.characters;
+
+        check(
+          "data-props is read in declaration order, with $preview split off",
+          JSON.stringify(propsSchema.props.map((p) => p.name)) ===
+            JSON.stringify(["tone", "span", "loud", "shadowed", "label"]) &&
+            propsSchema.preview?.width === 360 &&
+            propsSchema.preview?.height === 120,
+          `${JSON.stringify(propsSchema.props.map((p) => p.name))} preview ${JSON.stringify(propsSchema.preview)}`,
+        );
+        const enumerable = window.enumerableProps(propsSchema);
+        check(
+          "only enum and boolean props are enumerable — int and untyped are not",
+          JSON.stringify(enumerable.map((p) => `${p.name}(${p.values.length})`)) ===
+            JSON.stringify(["tone(7)", "loud(2)"]),
+          JSON.stringify(enumerable.map((p) => `${p.name}(${p.values.length})`)),
+        );
+
+        const propsDefaultDoc = await window.extractDocument(propsHtml, "Props default", {
+          viewportWidth: 500,
+        });
+        check(
+          "a declared default reaches the root component's props",
+          textOf(propsDefaultDoc.root, "Plain") === "alpha",
+          textOf(propsDefaultDoc.root, "Plain"),
+        );
+        check(
+          "props beat state in the resolution scope",
+          textOf(propsDefaultDoc.root, "Shadowed") === "from-props",
+          textOf(propsDefaultDoc.root, "Shadowed"),
+        );
+        check(
+          "renderVals() beats props in the resolution scope",
+          textOf(propsDefaultDoc.root, "Rendered") === "from-renderVals",
+          textOf(propsDefaultDoc.root, "Rendered"),
+        );
+
+        const propsOverrideDoc = await window.extractDocument(propsHtml, "Props override", {
+          viewportWidth: 500,
+          propOverrides: { tone: "zeta" },
+        });
+        check(
+          "propOverrides beat the declared default",
+          textOf(propsOverrideDoc.root, "Plain") === "zeta",
+          textOf(propsOverrideDoc.root, "Plain"),
+        );
+
+        // --- dc-import: one Claude Design document embedded in another
+        // (test/fixture/dcimport-host.html + dcimport-panel.dc.html) ------------
+        // Before this resolved, a <dc-import> mounted as a childless unknown
+        // element and walk() dropped it at the zero-size check, so a board made
+        // of nothing but embedded panels imported as an empty strip — with
+        // every counter reading correct, because nothing counted them.
+        const dcPanelSrc = await (await fetch("dcimport-panel.dc.html")).text();
+        const dcCycleSrc = await (await fetch("dcimport-cycle.dc.html")).text();
+        // Keyed the way src/ui/main.ts's collectDocumentSources keys a real
+        // drop: component name, lowercase alias, and the raw filename.
+        const dcSources = {
+          "Dcimport Panel": dcPanelSrc,
+          "dcimport panel": dcPanelSrc,
+          "dcimport-panel.dc.html": dcPanelSrc,
+          "Dcimport Cycle": dcCycleSrc,
+        };
+        const dcHostHtml = await (await fetch("dcimport-host.html")).text();
+        const dcDoc = await window.extractDocument(dcHostHtml, "Dc import host", {
+          viewportWidth: 1400,
+          documentSources: dcSources,
+        });
+        const dcResolved = dcDoc.dynamicContent.resolved;
+
+        const findAllByName = (node, name) => {
+          const out = [];
+          const scan = (n) => {
+            if (n.name === name) out.push(n);
+            for (const child of n.children || []) scan(child);
+          };
+          scan(node);
+          return out;
+        };
+        const dcHex = (node) => {
+          const c = node?.fills?.[0]?.color;
+          if (!c) return undefined;
+          const toHex = (n) =>
+            Math.round(Math.max(0, Math.min(1, n)) * 255)
+              .toString(16)
+              .padStart(2, "0");
+          return `#${toHex(c.r)}${toHex(c.g)}${toHex(c.b)}`.toUpperCase();
+        };
+
+        const dcPanels = findAllByName(dcDoc.root, "Dcimport Panel");
+        check(
+          "every dc-import call site is gone from the mounted document",
+          dcDoc.dynamicContent.documents === 0,
+          `${dcDoc.dynamicContent.documents} left standing`,
+        );
+        check(
+          "five call sites inlined, three stubbed, two targets compiled",
+          // Five: four panels plus the cycle document's own outer call site,
+          // which resolves normally — it is the self-reference INSIDE it that
+          // is refused. Three stubs: both missing names and that refusal.
+          dcResolved.documentsInlined === 5 &&
+            dcResolved.documentsStubbed === 3 &&
+            JSON.stringify(dcResolved.documentsResolved) ===
+              JSON.stringify(["Dcimport Panel", "Dcimport Cycle"]),
+          `inlined ${dcResolved.documentsInlined}, stubbed ${dcResolved.documentsStubbed}, resolved ${JSON.stringify(dcResolved.documentsResolved)}`,
+        );
+        check(
+          "each inlined panel is a named host frame at the target's authored size",
+          dcPanels.length === 4 && dcPanels.every((p) => p.width === 180 && p.height === 90),
+          JSON.stringify(dcPanels.map((p) => `${p.width}x${p.height}`)),
+        );
+        // A `display:contents` host measures 0x0 and every descendant's x/y is
+        // then computed against that zero rect. The panel body sits flush in
+        // the host, so anything but (0,0) means the wrapper is not a real box.
+        check(
+          "the host wrapper is a real box, so its content is not offset against a zero rect",
+          dcPanels.every((p) => {
+            const body = (p.children || [])[0];
+            return body && body.name === "Panel body" && body.x === 0 && body.y === 0;
+          }),
+          JSON.stringify(
+            dcPanels.map((p) => `${p.children?.[0]?.name}@${p.children?.[0]?.x},${p.children?.[0]?.y}`),
+          ),
+        );
+        const dcCaptions = dcPanels.map(
+          (p) => findByName(p, "Panel chip")?.children?.[0]?.text?.characters,
+        );
+        check(
+          "each call site renders on its own instance, with its own props",
+          JSON.stringify(dcCaptions) ===
+            JSON.stringify(["tone=one", "tone=two", "tone=three", "tone=dark"]),
+          JSON.stringify(dcCaptions),
+        );
+        // "Cell three" exists only inside <sc-if value="{{ showThird }}">, whose
+        // children live in a <template>'s inert .content fragment. A tree pass
+        // placed before conditionals are applied finds three call sites, not four.
+        check(
+          "a dc-import inside <sc-if> is reached, which querySelectorAll cannot do",
+          dcCaptions.includes("tone=three"),
+          JSON.stringify(dcCaptions),
+        );
+        // THE assertion this whole step turns on. The target defines
+        // --dcip-surface in its OWN helmet and writes every colour as
+        // var(--dcip-surface, #ffffff). Without the hoist into the parent head,
+        // extract.ts never adopts that rule, every var() falls back to its
+        // literal, and all four panels import white while every counter above
+        // stays green.
+        check(
+          "a target's helmet custom property resolves, rather than falling back to the var() literal",
+          dcHex(findByName(dcPanels[0], "Panel body")) === "#123456",
+          dcHex(findByName(dcPanels[0], "Panel body")),
+        );
+        check(
+          "the dark call site picks the target's dark rule, not its light one",
+          dcHex(findByName(dcPanels[3], "Panel body")) === "#2C2C2C",
+          dcHex(findByName(dcPanels[3], "Panel body")),
+        );
+        const dcMissing = findByName(dcDoc.root, "Missing Panel");
+        check(
+          "a missing target becomes a visible hint-sized box, not a dropped element",
+          dcMissing?.width === 200 &&
+            dcMissing?.height === 120 &&
+            JSON.stringify([...dcResolved.documentsMissing].sort()) ===
+              JSON.stringify(["Missing Panel", "Unsized Panel"]),
+          `${dcMissing?.width}x${dcMissing?.height}, missing ${JSON.stringify(dcResolved.documentsMissing)}`,
+        );
+        const dcUnsized = findByName(dcDoc.root, "Unsized Panel");
+        check(
+          "a missing target with no hint-size falls back to the 60px default height",
+          dcUnsized?.height === 60,
+          `${dcUnsized?.width}x${dcUnsized?.height}`,
+        );
+        check(
+          "a self-importing document is refused once and named, not recursed into",
+          dcResolved.documentCycles.length === 1 &&
+            dcResolved.documentCycles[0] === "Dcimport Cycle → Dcimport Cycle",
+          JSON.stringify(dcResolved.documentCycles),
+        );
+        // The counters above are what the UI's hold decision reads; these two
+        // are what the user is actually told. A correctly sized grey box with
+        // no name attached to it is indistinguishable from a design decision,
+        // so the summary has to say which file to go and fetch.
+        check(
+          "every missing embedded document is named in the import summary",
+          dcDoc.warnings.some(
+            (w) => w.includes("Missing Panel") && w.includes("Unsized Panel"),
+          ),
+          JSON.stringify(dcDoc.warnings),
+        );
+        // The panel's helmet holds a <script> that mountDocument never adopts.
+        // Without this the difference between Claude Design's render and ours
+        // is a font or a polyfill that simply is not there, with every counter
+        // reading correct.
+        check(
+          "a dropped helmet script is counted and reported, not silently discarded",
+          dcResolved.helmetScriptsDropped === 1 &&
+            dcDoc.warnings.some((w) => w.includes("<helmet>")),
+          `dropped ${dcResolved.helmetScriptsDropped}, warnings ${JSON.stringify(dcDoc.warnings)}`,
+        );
+
+        // --- dc-import in a document with no script of its own
+        // (test/fixture/dcimport-scriptless.html) -------------------------------
+        // The entry gate used to return early on "no data-dc-script", which
+        // leaves a pure-markup canvas board's dc-imports unresolved. The
+        // relaxation must not become a tree-wide pass against an empty scope:
+        // that rewrites every {{ }} to "" and the UI stops warning about
+        // documents it genuinely cannot render.
+        const dcNoScriptHtml = await (await fetch("dcimport-scriptless.html")).text();
+        const dcNoScriptDoc = await window.extractDocument(dcNoScriptHtml, "Dc import scriptless", {
+          viewportWidth: 600,
+          documentSources: dcSources,
+        });
+        check(
+          "a script-less document still inlines its dc-imports",
+          dcNoScriptDoc.dynamicContent.resolved.documentsInlined === 1 &&
+            dcNoScriptDoc.dynamicContent.documents === 0,
+          `inlined ${dcNoScriptDoc.dynamicContent.resolved.documentsInlined}, left ${dcNoScriptDoc.dynamicContent.documents}`,
+        );
+        check(
+          "a script-less document's own {{ }} placeholders are left alone, so the UI still warns",
+          dcNoScriptDoc.dynamicContent.placeholders > 0 &&
+            dcNoScriptDoc.dynamicContent.resolved.ran === false &&
+            findByName(dcNoScriptDoc.root, "Unresolvable")?.children?.[0]?.text?.characters ===
+              "{{ neverResolves }}",
+          `placeholders ${dcNoScriptDoc.dynamicContent.placeholders}, ran ${dcNoScriptDoc.dynamicContent.resolved.ran}, text ${JSON.stringify(findByName(dcNoScriptDoc.root, "Unresolvable")?.children?.[0]?.text?.characters)}`,
+        );
+        // Every sibling this document names was supplied, so there is nothing
+        // to go and fetch. A warning that fires on "this document embeds
+        // something" rather than on "something is missing" trains people to
+        // ignore the panel, which is worse than not warning at all.
+        check(
+          "a document whose siblings all resolved is not told anything is missing",
+          dcNoScriptDoc.dynamicContent.resolved.documentsMissing.length === 0 &&
+            !dcNoScriptDoc.warnings.some((w) => w.includes("placeholder box")),
+          JSON.stringify(dcNoScriptDoc.warnings),
+        );
+
+        // --- State matrix: one mount per prop combination
+        // (test/fixture/states-mini.dc.html) -----------------------------------
+        // extractStateMatrix is the only path that mounts the same document
+        // once per combination, and until this ran it had no browser coverage
+        // at all. test/e2e/run.ts scenario N asserts the PLANNING half over
+        // synthetic documents, and the plan is still right when every mount
+        // renders the same picture: changing `propOverrides: combo.values` to
+        // `propOverrides: {}` in src/ui/extract.ts left the whole suite green
+        // while a real 14-frame Portage import came back as fourteen identical
+        // default panels, every one correctly named and correctly stamped with
+        // `doc.props`. Counts and names cannot see that. Difference can, so
+        // everything below reads the frames rather than the labels.
+        const statesHtml = await (await fetch("states-mini.dc.html")).text();
+        const statesAxes = window.documentStateAxes(statesHtml);
+        check(
+          "the enum props become axes in declaration order, the int and untyped ones do not",
+          JSON.stringify(statesAxes.map((a) => `${a.name}(${a.values.join("|")})`)) ===
+            JSON.stringify(["state(empty|ready|done)", "theme(light|dark)"]),
+          JSON.stringify(statesAxes.map((a) => `${a.name}(${a.values.join("|")})`)),
+        );
+
+        const stateDocs = await window.extractStateMatrix(statesHtml, "States Mini", {
+          states: { props: ["state", "theme"] },
+        });
+        // What each frame's name claims, parsed back out of the name itself.
+        // Reading the claim from the name and the truth from the tree is the
+        // link the sabotage severs, so the two sides are never taken from the
+        // same place.
+        const statesClaim = (doc) => {
+          const claim = {};
+          for (const part of doc.name.split(" · ").slice(1)) {
+            const [key, value] = part.split("=");
+            claim[key] = value;
+          }
+          return claim;
+        };
+        const statesSurface = (doc) => dcHex(findByName(doc.root, "State surface"));
+        const statesStatus = (doc) => textOf(doc.root, "Status");
+        const statesDetail = (doc) => textOf(doc.root, "Detail");
+        const STATES_TEXT = {
+          empty: ["No file loaded.", "Drop a file to begin."],
+          ready: ["homepage.html ready.", "42 layers to create."],
+          done: ["Imported.", "42 layers created."],
+        };
+        const STATES_SURFACE = { light: "#FFFFFF", dark: "#1E1E1E" };
+
+        check(
+          "3 x 2 mounts as six frames, axis 0 fastest, named from the combination",
+          JSON.stringify(stateDocs.map((d) => d.name)) ===
+            JSON.stringify([
+              "States Mini · state=empty · theme=light",
+              "States Mini · state=ready · theme=light",
+              "States Mini · state=done · theme=light",
+              "States Mini · state=empty · theme=dark",
+              "States Mini · state=ready · theme=dark",
+              "States Mini · state=done · theme=dark",
+            ]),
+          JSON.stringify(stateDocs.map((d) => d.name)),
+        );
+        // The assertion that would have caught it on its own. Six frames whose
+        // rendered content collapses to one picture is the exact failure, and
+        // it is invisible to every count in the suite.
+        const statesPrints = stateDocs.map(
+          (d) => `${statesStatus(d)} | ${statesDetail(d)} | ${statesSurface(d)}`,
+        );
+        check(
+          "every combination renders a different frame, by text or by fill",
+          new Set(statesPrints).size === stateDocs.length,
+          `${new Set(statesPrints).size} distinct of ${stateDocs.length}: ${JSON.stringify(statesPrints)}`,
+        );
+        check(
+          "the frame named theme=dark is the one carrying the dark surface",
+          stateDocs.every((d) => statesSurface(d) === STATES_SURFACE[statesClaim(d).theme]),
+          JSON.stringify(stateDocs.map((d) => `${statesClaim(d).theme}:${statesSurface(d)}`)),
+        );
+        check(
+          "the frame named state=<x> is the one showing state <x>'s text",
+          stateDocs.every(
+            (d) =>
+              statesStatus(d) === STATES_TEXT[statesClaim(d).state][0] &&
+              statesDetail(d) === STATES_TEXT[statesClaim(d).state][1],
+          ),
+          JSON.stringify(stateDocs.map((d) => `${statesClaim(d).state}:${statesStatus(d)}`)),
+        );
+        // `doc.props` is what src/plugin/build.ts stamps onto the Figma node,
+        // so a frame whose stamp disagrees with its own pixels hands a designer
+        // a component definition that is wrong in the one place they will trust
+        // it. Checked against the render, not against the name, because the
+        // name and the stamp are both written from the same combination and
+        // will always agree with each other.
+        check(
+          "the props stamped on a frame are the props it actually rendered",
+          stateDocs.every(
+            (d) =>
+              statesStatus(d) === STATES_TEXT[d.props.state][0] &&
+              statesSurface(d) === STATES_SURFACE[d.props.theme],
+          ),
+          JSON.stringify(
+            stateDocs.map((d) => `${d.props.state}/${d.props.theme}:${statesStatus(d)}`),
+          ),
+        );
+        // The surface measures well under 200px tall, so an unfloored matrix
+        // would import as a grid of ragged cells for what is one component.
+        check(
+          "every frame is grown to the declared $preview, so the matrix is a grid",
+          stateDocs.every((d) => d.root.width === 320 && d.root.height === 200) &&
+            stateDocs.every((d) => !d.warnings.some((w) => w.includes("larger than"))),
+          JSON.stringify(stateDocs.map((d) => `${d.root.width}x${d.root.height}`)),
+        );
+
+        // --- Form controls (test/fixture/form-controls.html) --------------------
+        // A <select>'s chosen option, an <input>'s value or placeholder and a
+        // <textarea>'s placeholder are visible text that is not a DOM text
+        // node, so the text walk never saw any of it: 50 strings and 32
+        // checkboxes were dropped out of the Portage export in silence. These
+        // assertions are on the OUTPUT — the string, and where it landed —
+        // because a count of nodes stayed green through the whole outage.
+        const formHtml = await (await fetch("form-controls.html")).text();
+        const formDoc = await window.extractDocument(formHtml, "Form controls", {
+          viewportWidth: 400,
+        });
+        const formText = (name) => {
+          const frame = findByName(formDoc.root, name);
+          return frame?.children?.find((c) => c.kind === "TEXT");
+        };
+        const formStrings = [];
+        (function collectStrings(node) {
+          if (node.kind === "TEXT") formStrings.push(node.text.characters);
+          for (const child of node.children || []) collectStrings(child);
+        })(formDoc.root);
+
+        check(
+          "a <select>'s chosen option is extracted as text",
+          formStrings.includes("Create a new local collection") &&
+            formStrings.includes("Semantic tokens"),
+          JSON.stringify(formStrings),
+        );
+        // The load-bearing geometry assertion. A native select insets its text
+        // by 4px past its own padding and reserves 16px for the arrow, both
+        // measured off Chrome's render; the frame is 360 wide with a 1px border
+        // and 6px padding, so the text box is 11 -> 326 and NOT 7 -> 346.
+        check(
+          "the option text is inset past the select's padding and its arrow",
+          (() => {
+            const t = formText("Collection picker");
+            return t && t.x === 11 && t.width === 326;
+          })(),
+          (() => {
+            const t = formText("Collection picker");
+            return t ? `x=${t.x} w=${t.width}` : "no text node";
+          })(),
+        );
+        check(
+          "appearance:none removes both, so the text starts at the content edge",
+          (() => {
+            const t = formText("Styled picker");
+            return t && t.x === 7 && t.width === 346;
+          })(),
+          (() => {
+            const t = formText("Styled picker");
+            return t ? `x=${t.x} w=${t.width}` : "no text node";
+          })(),
+        );
+        // The arrow Chrome paints is UA chrome with no DOM node, so the 16px
+        // band its padding reserved imported empty. A synthesised chevron fills
+        // it: pinned absolutely at the trailing edge (360 - 1 border - 6 padding
+        // - 16 band + 3 to centre a 10px glyph = x 340), vertically centred in
+        // the 24px control (y 9), and NOT stacked with the option text.
+        const arrowOf = (name) =>
+          findByName(formDoc.root, name)?.children?.find((c) => c.kind === "VECTOR");
+        check(
+          "a native select gets a chevron pinned in its arrow band",
+          (() => {
+            const a = arrowOf("Collection picker");
+            return (
+              a &&
+              a.absolute === true &&
+              a.x === 340 &&
+              a.y === 9 &&
+              a.width === 10 &&
+              a.height === 6 &&
+              /<path\b/.test(a.svg || "")
+            );
+          })(),
+          (() => {
+            const a = arrowOf("Collection picker");
+            return a
+              ? `x=${a.x} y=${a.y} ${a.width}x${a.height} abs=${a.absolute}`
+              : "no vector child";
+          })(),
+        );
+        // Negative control: an appearance:none select drew its own arrow, so a
+        // second synthesised one would double it. This stays green when the
+        // chevron code is reverted; only the assertion above goes red.
+        check(
+          "an appearance:none select is left to its own drawn arrow",
+          !arrowOf("Styled picker"),
+          arrowOf("Styled picker") ? "unexpected chevron" : "none",
+        );
+        // A one-line control centres its value in the content box: an input of
+        // the same font at height 24 and at height 40 puts its ink at y=8 and
+        // y=16. 24 less a 2px border is 22 of content, an 11px line box is
+        // 13.75, so the top of the line sits at 1 + (22 - 13.75) / 2.
+        check(
+          "a single-line control's value is vertically centred, not top-aligned",
+          (() => {
+            const t = formText("Named field");
+            return (
+              t &&
+              Math.abs(t.y - 5.13) < 0.1 &&
+              t.text.verticalAlign === "CENTER" &&
+              t.text.characters === "Portage panel"
+            );
+          })(),
+          (() => {
+            const t = formText("Named field");
+            return t ? `y=${t.y} vAlign=${t.text.verticalAlign}` : "no text node";
+          })(),
+        );
+        check(
+          "a right-aligned number field keeps its alignment through the frame",
+          (() => {
+            const frame = findByName(formDoc.root, "Width field");
+            const t = formText("Width field");
+            return (
+              t &&
+              t.text.characters === "1440" &&
+              t.text.align === "RIGHT" &&
+              frame.layout?.crossAlign === "MAX"
+            );
+          })(),
+          (() => {
+            const frame = findByName(formDoc.root, "Width field");
+            const t = formText("Width field");
+            return `${t?.text.characters} align=${t?.text.align} cross=${frame?.layout?.crossAlign}`;
+          })(),
+        );
+        check(
+          "an empty input and an empty textarea import their placeholders",
+          formStrings.includes("Search filings") &&
+            formStrings.includes("<!doctype html> …"),
+          JSON.stringify(
+            formStrings.filter((s) => s.includes("Search") || s.includes("doctype")),
+          ),
+        );
+        // ::placeholder is its own cascade. Painting the placeholder in the
+        // control's `color` would put near-black text where the screen showed
+        // grey.
+        check(
+          "a placeholder is drawn in ::placeholder's colour, not the control's",
+          (() => {
+            const c = formText("Empty field")?.text.runs[0]?.fill.color;
+            return c && scopedColorHex(c) === "#B3B3B3";
+          })(),
+          (() => {
+            const c = formText("Empty field")?.text.runs[0]?.fill.color;
+            return c ? scopedColorHex(c) : "no run";
+          })(),
+        );
+        // The two shapes that already worked. A <button>'s label and a
+        // <textarea>'s initial value ARE child text nodes, and the existing walk
+        // measures them with a Range, so it knows this one line of copy is one
+        // line inside a 36px box. The control path cannot know that — it has no
+        // laid-out text to measure — and would call the same string wrapped.
+        // Claiming these controls would therefore change a HUG label into a
+        // FILL one, so the assertion is that they still come out of the old
+        // path, not merely that the string is present.
+        check(
+          "text that was already a DOM node still comes out of the ordinary walk",
+          formStrings.filter((s) => s === "Import").length === 1 &&
+            formStrings.filter((s) => s === "Already a text node").length === 1 &&
+            formText("Filled box")?.text.singleLine === true &&
+            formText("Filled box")?.sizing.horizontal === "HUG" &&
+            // ...while the placeholder beside it, which only the control path
+            // can see, is correctly treated as filling its box.
+            formText("Paste box")?.text.singleLine === false,
+          `filled singleLine=${formText("Filled box")?.text.singleLine} ` +
+            `sizing=${formText("Filled box")?.sizing.horizontal} ` +
+            `placeholder singleLine=${formText("Paste box")?.text.singleLine}`,
+        );
+        // A checked checkbox has no text but is a visible 13x13 swatch. Chrome
+        // reports background-color: rgba(0,0,0,0) and border: 0px for it, so
+        // without this it is an empty frame with nothing in it at all.
+        check(
+          "a checked checkbox becomes a frame filled with its accent colour",
+          (() => {
+            const box = findByName(formDoc.root, "Checked box");
+            const fill = box?.fills?.[0];
+            return (
+              fill &&
+              scopedColorHex(fill.color) === "#0D99FF" &&
+              box.cornerRadius.tl === 2 &&
+              !box.border
+            );
+          })(),
+          (() => {
+            const box = findByName(formDoc.root, "Checked box");
+            return box?.fills?.[0]
+              ? `${scopedColorHex(box.fills[0].color)} r=${box.cornerRadius.tl} border=${!!box.border}`
+              : "no fill";
+          })(),
+        );
+        check(
+          "an unchecked box is an outline, and a checked radio is a full circle",
+          (() => {
+            const off = findByName(formDoc.root, "Unchecked box");
+            const dot = findByName(formDoc.root, "Checked dot");
+            return (
+              off?.border?.weights.top === 1 &&
+              scopedColorHex(off.border.paint.color) === "#767676" &&
+              // Chrome's own paint, never bound to one of the design's variables.
+              !off.border.paint.token &&
+              !off.fills[0].token &&
+              dot?.cornerRadius.tl === 6.5
+            );
+          })(),
+          (() => {
+            const off = findByName(formDoc.root, "Unchecked box");
+            const dot = findByName(formDoc.root, "Checked dot");
+            return `border=${off?.border ? scopedColorHex(off.border.paint.color) : "none"} radius=${dot?.cornerRadius.tl}`;
+          })(),
+        );
+        // display:none is still display:none: a hidden file input must not
+        // become a "Choose File" layer nobody can see on the page.
+        check(
+          "a display:none control contributes nothing",
+          !findByName(formDoc.root, "Hidden file"),
+        );
+
+        // --- Line height (test/fixture/line-height.html) ------------------------
+        // `line-height: normal` is the font's own leading, which Chrome and
+        // Figma read off possibly different faces; left as AUTO the block sits
+        // shorter in Figma than on screen, line by line. The extractor measures
+        // Chrome's actual strut and pins it, so a paragraph keeps its height.
+        const lhHtml = await (await fetch("line-height.html")).text();
+        const lhDoc = await window.extractDocument(lhHtml, "Line height", {
+          viewportWidth: 400,
+        });
+        const lhLine = (name) =>
+          findByName(lhDoc.root, name)?.text?.runs?.[0]?.lineHeight;
+        check(
+          "line-height:normal is pinned to a measured pixel value, not left as AUTO",
+          (() => {
+            const lh = lhLine("Normal metrics");
+            // Arial-normal is ~1.15x; the wide bound only rules out AUTO (null)
+            // and a nonsense measurement, so it holds across font versions.
+            return typeof lh === "number" && lh > 16 && lh < 24;
+          })(),
+          `lineHeight=${lhLine("Normal metrics")}`,
+        );
+        check(
+          "an authored line-height is carried through unchanged",
+          lhLine("Fixed metrics") === 28,
+          `lineHeight=${lhLine("Fixed metrics")}`,
+        );
+
+        // --- Clipping (test/fixture/overflow.html) ------------------------------
+        // `clips` used to test the `overflow` SHORTHAND for the exact string
+        // "hidden". A scroll region written `overflow-y:auto; overflow-x:hidden`
+        // computes that shorthand to "hidden auto", so it matched nothing and
+        // 16 regions in the Portage export imported unclipped, spilling 45 to
+        // 214px of content over a pinned footer.
+        const overflowHtml = await (await fetch("overflow.html")).text();
+        const overflowDoc = await window.extractDocument(overflowHtml, "Overflow", {
+          viewportWidth: 400,
+        });
+        const clipsOf = (name) => findByName(overflowDoc.root, name)?.clips;
+
+        check(
+          "a one-axis scroll region clips, though its shorthand is 'hidden auto'",
+          clipsOf("Scroll region") === true,
+          `clips=${clipsOf("Scroll region")}`,
+        );
+        // Same box, from the other side: the footer under that region has to
+        // still be the bottom of the panel. If the region does not clip, its
+        // rows paint straight over it.
+        check(
+          "the region really does overflow, so clipping is what is being tested",
+          (() => {
+            const region = findByName(overflowDoc.root, "Scroll region");
+            if (!region) return false;
+            const bottom = Math.max(...region.children.map((c) => c.y + c.height));
+            return bottom > region.height + 20;
+          })(),
+          (() => {
+            const region = findByName(overflowDoc.root, "Scroll region");
+            const bottom = Math.max(...region.children.map((c) => c.y + c.height));
+            return `content reaches ${Math.round(bottom)} in a box of ${region.height}`;
+          })(),
+        );
+        check(
+          "auto and scroll clip as well, since Figma has no scrollbar to offer",
+          clipsOf("Auto both") === true && clipsOf("Scroll both") === true,
+          `auto=${clipsOf("Auto both")} scroll=${clipsOf("Scroll both")}`,
+        );
+        check(
+          "overflow:clip still clips, and one clipped axis is enough",
+          clipsOf("Clip both") === true && clipsOf("Hidden on x only") === true,
+          `clip=${clipsOf("Clip both")} xOnly=${clipsOf("Hidden on x only")}`,
+        );
+        // The other half of the contract: nothing starts clipping that was not
+        // clipping before. An overflowing box that the browser lets spill has
+        // to keep spilling, or content disappears off a design that showed it.
+        check(
+          "overflow:visible does not clip, and neither do plain blocks",
+          clipsOf("Visible both") === false &&
+            clipsOf("Pinned header") === false &&
+            clipsOf("Pinned footer") === false,
+          `visible=${clipsOf("Visible both")} header=${clipsOf("Pinned header")}`,
+        );
+
+        // --- Fixed-size boxes must not hug (test/fixture/fixed-box.html) --------
+        // A 24px icon square that centres one glyph was imported hugging its
+        // text, so the box collapsed onto the letter: the 16px Portage logo
+        // came in as an 8px bar in all 14 panels. It must stay FIXED. The pill
+        // beside it is the control: its width is its label plus padding, so it
+        // sits tight against its text and still hugs.
+        const fixedBoxHtml = await (await fetch("fixed-box.html")).text();
+        const fixedBoxDoc = await window.extractDocument(fixedBoxHtml, "Fixed box", {
+          viewportWidth: 400,
+        });
+        const frameWithText = (label) => {
+          let hit = null;
+          const scan = (n) => {
+            if (
+              n.kind === "FRAME" &&
+              (n.children || []).some(
+                (c) => c.kind === "TEXT" && c.text?.characters?.trim() === label,
+              )
+            )
+              hit = n;
+            (n.children || []).forEach(scan);
+          };
+          scan(fixedBoxDoc.root);
+          return hit;
+        };
+        const iconBox = frameWithText("P");
+        const pill = frameWithText("Active");
+        // hugContent is the flag that drives the collapse: it makes the builder
+        // set the frame's axes to AUTO, which recomputes its width down onto the
+        // glyph. The IR width field is the measured 24 either way, so it is
+        // hugContent, not width, that has to be asserted here.
+        check(
+          "a fixed-size box does not hug its text (icon stays a square)",
+          iconBox?.layout?.hugContent === false,
+          `hugContent=${iconBox?.layout?.hugContent} measured=${Math.round(iconBox?.width ?? 0)}x${Math.round(iconBox?.height ?? 0)}`,
+        );
+        check(
+          "a pill whose width is its label still hugs (negative control)",
+          pill?.layout?.hugContent === true,
+          `hugContent=${pill?.layout?.hugContent} width=${Math.round(pill?.width ?? 0)}`,
+        );
+
+        // --- Canvas background (test/fixture/canvas-background.html) ------------
+        // The imported frame used to take its fill from
+        // getComputedStyle(document.body) — the HOST page's body, because the
+        // document is mounted into it rather than into an iframe. The plugin
+        // paints that body var(--figma-color-bg) !important, so the same import
+        // came back #FFFFFF on Figma's light theme and #2C2C2C on dark while
+        // Portage.dc.html authors body{background:#eceded}.
+        //
+        // The host page is painted a colour that is in no fixture before each
+        // extraction below, which is exactly what the plugin's !important rule
+        // does. If the fill ever comes back #FF00FF the old bug is back.
+        const canvasHtml = await (await fetch("canvas-background.html")).text();
+        const HOST_PAINT = "#ff00ff";
+        const extractOverHost = async (html, options) => {
+          const before = document.body.style.cssText;
+          document.body.style.setProperty("background", HOST_PAINT, "important");
+          try {
+            return await window.extractDocument(html, "Canvas", {
+              viewportWidth: 400,
+              ...options,
+            });
+          } finally {
+            document.body.style.cssText = before;
+          }
+        };
+        const rootHex = (doc) =>
+          doc.root.fills?.[0]?.color ? scopedColorHex(doc.root.fills[0].color) : undefined;
+
+        const canvasDoc = await extractOverHost(canvasHtml);
+        check(
+          "the imported frame's fill is the document's canvas, not the host page's",
+          rootHex(canvasDoc) === "#ECEDED",
+          `root fill ${rootHex(canvasDoc)} while the host body was ${HOST_PAINT}`,
+        );
+        // The colour is authored as var(--dv-canvas), so arriving at #ECEDED at
+        // all means the variable was resolved rather than parsed and dropped.
+        check(
+          "a canvas declared through var() binds to the variable it names",
+          canvasDoc.root.fills?.[0]?.token?.name === "dv-canvas" &&
+            canvasDoc.root.fills[0].token.via === "var",
+          JSON.stringify(canvasDoc.root.fills?.[0]?.token),
+        );
+
+        // A document that says nothing about its background gets what a browser
+        // paints behind a page that says nothing. Never the host's colour.
+        const bareHtml = canvasHtml.replace("background: var(--dv-canvas);", "");
+        const bareDoc = await extractOverHost(bareHtml);
+        check(
+          "a document with no canvas rule falls back to white, not to the host",
+          rootHex(bareDoc) === "#FFFFFF",
+          `root fill ${rootHex(bareDoc)}`,
+        );
+
+        // extraCss is a design system the user handed to the picker, and
+        // _ds/*/tokens/typography.css really does ship a body{} rule. It is not
+        // this document declaring what colour it is.
+        const suppliedDoc = await extractOverHost(bareHtml, {
+          extraCss: "body { background: #00ff00 }",
+        });
+        check(
+          "a separately supplied stylesheet's body rule does not repaint the canvas",
+          rootHex(suppliedDoc) === "#FFFFFF",
+          `root fill ${rootHex(suppliedDoc)}`,
+        );
+
+        // --- Layer names (test/fixture/frame-names.html) ------------------------
+        // 100 of the Portage export's 589 frames were called "Frame", 24 of
+        // them holding real text, and a layer panel with a hundred identical
+        // entries in it cannot be navigated. Every shape below is one that
+        // landed there, and every assertion names the frame it expects rather
+        // than counting how many are left, because a count says nothing about
+        // whether the names are right.
+        const namesHtml = await (await fetch("frame-names.html")).text();
+        const namesDoc = await window.extractDocument(namesHtml, "Frame names", {
+          viewportWidth: 400,
+        });
+        const namesUsed = [];
+        (function collectNames(node) {
+          if (node.kind === "FRAME") namesUsed.push(node.name);
+          for (const child of node.children || []) collectNames(child);
+        })(namesDoc.root);
+
+        check(
+          "no frame in this fixture is left called 'Frame'",
+          !namesUsed.includes("Frame"),
+          JSON.stringify(namesUsed),
+        );
+        check(
+          "a painted hairline is named as the separator it is",
+          namesUsed.filter((n) => n === "Divider").length === 2,
+          JSON.stringify(namesUsed.filter((n) => n === "Divider")),
+        );
+        check(
+          "an empty unpainted box is named as the space it holds open",
+          !!findByName(namesDoc.root, "Spacer"),
+          JSON.stringify(namesUsed),
+        );
+        // The old rule refused any caption over 40 characters, which is how a
+        // 97-character one ended up as "Frame" while `truncate` was right there.
+        check(
+          "a caption too long for the old cap is still named from its copy",
+          !!findByName(namesDoc.root, "Only needed when the document d…"),
+          JSON.stringify(namesUsed),
+        );
+        // The load-bearing one for multi-child containers, and the reason the
+        // rule tests `display: inline` exactly: three spans are one sentence,
+        // two buttons are two components.
+        check(
+          "a line of prose across inline spans is named from the whole line",
+          !!findByName(namesDoc.root, "none · add token files"),
+          JSON.stringify(namesUsed),
+        );
+        // A name is a description of what is on the canvas. "forget" and
+        // "unsaved" both sit in display:none spans, so textContent has them and
+        // the layer panel must not. "Saved" is named by the rule that was
+        // already there, which read textContent too.
+        check(
+          "text inside a display:none subtree never reaches a name",
+          namesUsed.includes("Saved") &&
+            !namesUsed.some((n) => n.includes("unsaved") || n.includes("forget")),
+          JSON.stringify(namesUsed.filter((n) => n.includes("Saved") || n.includes("·"))),
+        );
+        check(
+          "role is read as authored intent, like aria-label",
+          !!findByName(namesDoc.root, "Tablist"),
+          JSON.stringify(namesUsed),
+        );
+        check(
+          "an unnamed form control is named by what kind of control it is",
+          !!findByName(namesDoc.root, "Checkbox") &&
+            !!findByName(formDoc.root, "Select"),
+          JSON.stringify(namesUsed),
+        );
+        // The negative half, in its own file so the check above can insist that
+        // nothing at all is left called "Frame". This row is three separate
+        // components at uneven gaps, so no auto-layout is inferred and the
+        // naming rules run all the way down. "Frame" at least does not lie;
+        // "My Searches Set Alert Clear" would.
+        const glueHtml = await (await fetch("frame-names-negative.html")).text();
+        const glueDoc = await window.extractDocument(glueHtml, "Glue", {
+          viewportWidth: 400,
+        });
+        const glueNames = [];
+        (function collectGlue(node) {
+          if (node.kind === "FRAME") glueNames.push(node.name);
+          for (const child of node.children || []) collectGlue(child);
+        })(glueDoc.root);
+        check(
+          "separate components in a row are never glued into one name",
+          glueNames.includes("Frame") &&
+            !glueNames.some((n) => n.includes("My Searches") && n.includes("Set Alert")),
+          JSON.stringify(glueNames),
+        );
+        check(
+          "an authored class still outranks every rule below it",
+          namesUsed.filter((n) => n === "Rule Row").length === 2 &&
+            !!findByName(namesDoc.root, "Check Row"),
+          JSON.stringify(namesUsed),
+        );
+
+        // --- The host page: isolation, token CSS, asset inlining ---------------
+        // Everything below measures the PANEL as part of the system under test.
+        // It is the page the document gets mounted into (mountDocument renders
+        // into the plugin's own document, because a nested iframe would have an
+        // opaque origin and be unreadable), and its stylesheet, its token-CSS
+        // collection and its asset inlining all decide what the extractor ends
+        // up measuring. Three defects lived here undetected while both suites
+        // were at 100%, because no test had the panel in the page at all.
+        await runHostChecks();
+
+        // --- Report ------------------------------------------------------------
+        const passed = results.filter((r) => r.ok).length;
+        document.getElementById("results").innerHTML =
+          `<h2>${passed}/${results.length} passed</h2>` +
+          results
+            .map(
+              (r) =>
+                `<div class="${r.ok ? "pass" : "fail"}">${r.ok ? "PASS" : "FAIL"} — ${r.name}${r.detail ? ` <span style="opacity:.6">(${r.detail})</span>` : ""}</div>`,
+            )
+            .join("");
+        document.getElementById("tree").textContent = outline(doc.root);
+
+        console.log(`HARNESS ${passed}/${results.length} passed`);
+        for (const r of results) {
+          if (!r.ok) console.log(`HARNESS FAIL: ${r.name} :: ${r.detail}`);
+        }
+
+        // --- Capture IR to disk (test/e2e/serve.py) ---------------------------
+        await capture("fixture-screen", doc);
+        await capture("orphaned-screen", orphanDoc);
+        await capture("scoped-surface", scopedDoc);
+
+        console.log("HARNESS DONE");
+      }
+
+      // -----------------------------------------------------------------
+      // The host page: ui.template.html's stylesheet, and the two things
+      // src/ui/main.ts hands the extractor before it measures anything (the
+      // export's token CSS, and its inlined assets).
+      //
+      // Both are fetched, never copied. A second copy of the panel's stylesheet
+      // in this file would keep passing after the real one changed, which is
+      // the failure mode these checks exist to end.
+      // -----------------------------------------------------------------
+      async function runHostChecks() {
+        const templateText = await (await fetch("/ui.template.html")).text();
+        const template = new DOMParser().parseFromString(templateText, "text/html");
+        const panelCss = template.querySelector("head style").textContent;
+
+        // A DIRECT child of <body>, which is where ui.template.html puts the
+        // shell and what its `body > #cd2f-app` scoping keys off: the mount
+        // container is a child of <body> too, so a document's own elements are
+        // always at least its grandchildren and can never match.
+        document.body.appendChild(
+          document.importNode(template.getElementById("cd2f-app"), true),
+        );
+        // src/ui/main.ts wires itself to that markup at module scope, so it can
+        // only be imported once the markup is in the page. test/entry.ts
+        // exposes it as a lazy dynamic import for exactly this.
+        const panel = await window.loadPanel();
+
+        const flatten = (node, out = []) => {
+          out.push(node);
+          for (const child of node.children || []) flatten(child, out);
+          return out;
+        };
+        const hexOf = (color) => {
+          if (!color) return undefined;
+          const toHex = (n) =>
+            Math.round(Math.max(0, Math.min(1, n)) * 255)
+              .toString(16)
+              .padStart(2, "0");
+          return `#${toHex(color.r)}${toHex(color.g)}${toHex(color.b)}`.toUpperCase();
+        };
+        const textNode = (root, characters) =>
+          flatten(root).find(
+            (n) => n.kind === "TEXT" && n.text?.characters?.trim() === characters,
+          );
+
+        // --- Direction 1: the panel's stylesheet must not reach the document ---
+        const isoHtml = await (await fetch("host-isolation.html")).text();
+        const clean = await window.extractDocument(isoHtml, "Iso", { viewportWidth: 400 });
+
+        const panelStyle = document.createElement("style");
+        panelStyle.textContent = panelCss;
+        document.head.appendChild(panelStyle);
+        const underPanel = await window.extractDocument(isoHtml, "Iso", {
+          viewportWidth: 400,
+        });
+
+        const cleanNodes = flatten(clean.root);
+        const panelNodes = flatten(underPanel.root);
+        let firstDiff = "identical";
+        for (let i = 0; i < Math.min(cleanNodes.length, panelNodes.length); i++) {
+          if (JSON.stringify(cleanNodes[i]) === JSON.stringify(panelNodes[i])) continue;
+          const a = cleanNodes[i];
+          const b = panelNodes[i];
+          firstDiff =
+            `node ${i} "${a.name}": ${Math.round(a.width)}x${Math.round(a.height)}` +
+            ` -> "${b.name}" ${Math.round(b.width)}x${Math.round(b.height)}`;
+          break;
+        }
+        check(
+          "a document using the panel's own class names extracts identically with the panel's stylesheet in the page",
+          JSON.stringify(clean) === JSON.stringify(underPanel),
+          firstDiff,
+        );
+
+        // Named separately from the deep comparison above so a regression says
+        // WHICH structure went: this is the shape the real export lost, a
+        // header that sets its flex properties inline but never sets `display`
+        // and so stacks until someone else's `.cd2f-header { display: flex }`
+        // turns it into a row.
+        const header = findByName(underPanel.root, "Header");
+        check(
+          "the imported header keeps the two stacked lines it authored",
+          header && Math.round(header.height) === 76,
+          header ? `${Math.round(header.width)}x${Math.round(header.height)}` : "no Header node",
+        );
+        // The run's own size, not the box: the panel's `.cd2f-title` also
+        // declares a line-height, but without !important, so an inline
+        // line-height survives it and the BOX stays the same height while the
+        // type inside it is forced from 30px to 11px.
+        const title = textNode(underPanel.root, "Portage");
+        check(
+          "an authored font size survives the panel's !important type ramp",
+          title?.text?.runs?.[0]?.fontSize === 30,
+          `${title?.text?.runs?.[0]?.fontSize}px, box ${Math.round(title?.height ?? 0)} tall`,
+        );
+        const tokenColour = findByName(underPanel.root, "Token colour");
+        check(
+          "the panel's theme variables do not leak into a document that reads the same names",
+          hexOf(tokenColour?.fills?.[0]?.color) === "#FF00FF",
+          hexOf(tokenColour?.fills?.[0]?.color),
+        );
+
+        // --- Direction 2: a document's stylesheet must not reach the panel ----
+        // Adopted into <head> exactly as `mountDocument` adopts it, and left
+        // there for the same window of time: for the length of an extraction a
+        // stranger's rules are live on the panel's own markup.
+        const hostileText = await (await fetch("host-hostile.html")).text();
+        const hostileStyle = document.createElement("style");
+        hostileStyle.textContent = new DOMParser()
+          .parseFromString(hostileText, "text/html")
+          .querySelector("head style").textContent;
+        document.head.appendChild(hostileStyle);
+
+        const shellStyle = getComputedStyle(document.getElementById("cd2f-app"));
+        const headerStyle = getComputedStyle(
+          document.querySelector("#cd2f-app .cd2f-header"),
+        );
+        const titleStyle = getComputedStyle(document.querySelector("#cd2f-app .cd2f-title"));
+        check(
+          "an imported document's stylesheet cannot restyle the panel",
+          headerStyle.display === "flex" &&
+            headerStyle.paddingTop === "13px" &&
+            titleStyle.fontSize === "12px" &&
+            shellStyle.overflow === "hidden",
+          `header ${headerStyle.display} pad ${headerStyle.paddingTop}, ` +
+            `title ${titleStyle.fontSize}, shell overflow ${shellStyle.overflow}`,
+        );
+        hostileStyle.remove();
+        panelStyle.remove();
+
+        // --- The export's own token CSS (collectDsTokenCss) -------------------
+        // Built as a drop: `File`s carrying the relative paths a folder pick or
+        // a zip expansion would give them, which is what main.ts keys off.
+        const isoFiles = await isoExportFiles();
+        const tokens = await panel.collectDsTokenCss(isoFiles);
+        check(
+          "a token file reaches extraction as custom properties and nothing else",
+          /--iso-pad:\s*12px/.test(tokens.css) &&
+            /--iso-alt/.test(tokens.css) &&
+            !/line-height/.test(tokens.css) &&
+            !/font-size/.test(tokens.css) &&
+            !/iso-card/.test(tokens.css) &&
+            !/@font-face/.test(tokens.css),
+          JSON.stringify(tokens.css),
+        );
+
+        const panelFile = isoFiles.find((f) => f.name === "panel.dc.html");
+        const isoDocHtml = await panel.inlinedDocument(panelFile, isoFiles);
+        const withTokens = await window.extractDocument(isoDocHtml, "Iso panel", {
+          viewportWidth: 700,
+          extraCss: tokens.css,
+        });
+        const withoutTokens = await window.extractDocument(isoDocHtml, "Iso panel", {
+          viewportWidth: 700,
+        });
+
+        const card = (doc) => findByName(doc.root, "Card");
+        check(
+          "an ordinary rule in a token file does not move the layout",
+          Math.round(card(withTokens).height) === 60 &&
+            Math.round(card(withTokens).height) === Math.round(card(withoutTokens).height),
+          `${Math.round(card(withTokens).height)} with tokens, ` +
+            `${Math.round(card(withoutTokens).height)} without`,
+        );
+        const plain = (doc) => textNode(doc.root, "Plain");
+        check(
+          "text the document did not style is not restyled by the token file either",
+          Math.round(plain(withTokens).height) === Math.round(plain(withoutTokens).height),
+          `${Math.round(plain(withTokens).height)} with tokens, ` +
+            `${Math.round(plain(withoutTokens).height)} without`,
+        );
+        const varBox = (doc) => findByName(doc.root, "Var box");
+        check(
+          "the custom properties in that same file still reach the document",
+          Math.round(varBox(withTokens).height) === 44 &&
+            Math.round(varBox(withoutTokens).height) === 20,
+          `${Math.round(varBox(withTokens).height)} with tokens, ` +
+            `${Math.round(varBox(withoutTokens).height)} without`,
+        );
+        const isoTokens = withTokens.designSystem?.tokens ?? [];
+        const isoByName = new Map(isoTokens.map((t) => [t.name, t]));
+        check(
+          "the design system's tokens are all still discovered",
+          isoByName.get("iso-ink")?.resolved?.toUpperCase() === "#1B6F58" &&
+            isoByName.get("iso-pad")?.float === 12 &&
+            isoByName.get("iso-gap")?.float === 8 &&
+            isoByName.get("iso-alt")?.resolved?.toUpperCase() === "#654321",
+          JSON.stringify(isoTokens.map((t) => `${t.name}=${t.resolved ?? t.float}`)),
+        );
+
+        // --- url() inside an inlined stylesheet (inlineAssets) ----------------
+        // The sample string is ten characters at 20px in a shrink-to-fit box,
+        // and the design system's font advances one em per glyph: 200px is the
+        // right file, 100px is the decoy that a document-relative resolution
+        // would have found instead, and anything else is a fallback family
+        // because no face loaded at all.
+        const sample = textNode(withTokens.root, "ABCDEFGHIJ");
+        // The same document with the sheet stripped back out, so the 200 above
+        // is known to be the face's doing and not the box's: 200px has to be
+        // unreachable without it.
+        const noFontHtml = isoDocHtml.replace(/data:text\/css;base64,[^"']+/, "");
+        const noFont = await window.extractDocument(noFontHtml, "Iso panel", {
+          viewportWidth: 700,
+        });
+        const fallback = textNode(noFont.root, "ABCDEFGHIJ");
+        check(
+          "a stylesheet's url() is inlined, and resolved against the stylesheet rather than the document",
+          sample &&
+            Math.round(sample.width) === 200 &&
+            fallback &&
+            Math.round(fallback.width) !== 200,
+          `${Math.round(sample?.width ?? 0)}px with the face, ` +
+            `${Math.round(fallback?.width ?? 0)}px without it`,
+        );
+        const inlinedCss = await (await fetch(
+          isoDocHtml.match(/href="(data:text\/css;base64,[^"]+)"/)[1],
+        )).text();
+        check(
+          "every url() in the sheet is rewritten, and an absolute one is left alone",
+          (inlinedCss.match(/url\("data:font\/ttf;base64,/g) || []).length === 2 &&
+            !/url\(\s*["']?\.\./.test(inlinedCss) &&
+            inlinedCss.includes("https://example.invalid/iso-text.woff2"),
+          JSON.stringify(inlinedCss.replace(/base64,[^"]+/g, "base64,…")),
+        );
+        // Read here rather than at the end: the decoy document below inlines
+        // the other font on purpose, and this is the count for the two
+        // documents that share the design system's sheet.
+        check(
+          "the font is read and base64'd once for the whole drop, and the decoy not at all",
+          isoFontReads.system === 1 && isoFontReads.decoy === 0,
+          `system ${isoFontReads.system}, decoy ${isoFontReads.decoy}`,
+        );
+
+        // The other half of the same rule. A sheet sitting beside the document
+        // names fonts/iso-text.ttf, which is the narrow one, and has to get it:
+        // "resolved against the stylesheet" is only meaningful if two sheets in
+        // two places can name two different files and each gets the one it
+        // named.
+        const decoyFile = isoFiles.find((f) => f.name === "decoy.dc.html");
+        const decoyHtml = await panel.inlinedDocument(decoyFile, isoFiles);
+        const decoyDoc = await window.extractDocument(decoyHtml, "Iso decoy", {
+          viewportWidth: 700,
+        });
+        const decoySample = textNode(decoyDoc.root, "ABCDEFGHIJ");
+        check(
+          "a url() naming the file beside the document gets that file, not the design system's",
+          decoySample && Math.round(decoySample.width) === 100,
+          decoySample ? `${Math.round(decoySample.width)}px wide` : "no sample text node",
+        );
+
+        await runNamingChecks(panel);
+      }
+
+      /**
+       * Where the design system's NAME comes from.
+       *
+       * Against the real src/ui/main.ts, booted above, and against a real
+       * inlining pass, because that is the whole bug. `inferSystemName`
+       * (src/ui/extract.ts) reads the `_ds/<name>-<uuid>/` folder out of a
+       * stylesheet href, and by the time it runs `inlineAssets` has rewritten
+       * every href into a data: URI. It falls through to the SCREEN's name, and
+       * two screens of one export then asked for two Figma variable collections
+       * holding the same variables.
+       *
+       * A hand-built IRDocument cannot catch a regression here: the name is
+       * decided in the panel, from the dropped File list and the manifest, and
+       * neither reaches the extractor. So this drives the panel.
+       */
+      async function runNamingChecks(panel) {
+        // Asserted rather than assumed, and returned from rather than thrown
+        // through: `runHostChecks` runs before the report is written, so a
+        // TypeError here would cost the whole run its tally instead of one
+        // named failure.
+        const exported =
+          typeof panel.designSystemName === "function" &&
+          typeof panel.nameDesignSystems === "function";
+        check(
+          "the panel exposes the two functions that decide the design system's name",
+          exported,
+          `designSystemName=${typeof panel.designSystemName} nameDesignSystems=${typeof panel.nameDesignSystems}`,
+        );
+        if (!exported) return;
+
+        const DS = "_ds/acme-design-system-3f2a9c1e-7b4d-4e8a-9c21-5d6e7f8a9b0c";
+        const paths = [
+          "Screen One.dc.html",
+          "Screen Two.dc.html",
+          `${DS}/tokens/colors.css`,
+          `${DS}/_ds_manifest.json`,
+        ];
+        const files = [];
+        for (const path of paths) {
+          const bytes = await (await fetch(`ds-export/${encodeURI(path)}`)).arrayBuffer();
+          const file = new File([bytes], path.split("/").pop());
+          Object.defineProperty(file, "webkitRelativePath", {
+            value: `ds-export/${path}`,
+          });
+          files.push(file);
+        }
+        const manifest = await files[3].text();
+        const tokens = await panel.collectDsTokenCss(files);
+
+        // The premise, asserted rather than assumed: after inlining there is no
+        // `_ds/` path left in the markup for anything downstream to read.
+        const oneHtml = await panel.inlinedDocument(files[0], files);
+        check(
+          "inlining leaves no _ds path in the markup for the system name to be read from",
+          oneHtml.includes("data:text/css;base64,") && !oneHtml.includes(`${DS}/tokens`),
+          `data-uri=${oneHtml.includes("data:text/css;base64,")} _ds-path=${oneHtml.includes(`${DS}/tokens`)}`,
+        );
+
+        const twoHtml = await panel.inlinedDocument(files[1], files);
+        const docs = [
+          await window.extractDocument(oneHtml, "Screen One", {
+            viewportWidth: 400,
+            extraCss: tokens.css,
+            dsManifest: manifest,
+          }),
+          await window.extractDocument(twoHtml, "Screen Two", {
+            viewportWidth: 400,
+            extraCss: tokens.css,
+            dsManifest: manifest,
+          }),
+        ];
+        check(
+          "the extractor alone names each screen's design system after the screen",
+          docs[0].designSystem?.name === "Screen One" &&
+            docs[1].designSystem?.name === "Screen Two" &&
+            docs[0].designSystem?.key === "AcmeDesignSystem_3f2a9c" &&
+            docs[1].designSystem?.key === "AcmeDesignSystem_3f2a9c",
+          `${JSON.stringify(docs.map((d) => d.designSystem?.name))} keys=${JSON.stringify(docs.map((d) => d.designSystem?.key))}`,
+        );
+
+        // The fix, on the batch the panel posts to the sandbox.
+        panel.nameDesignSystems(docs, files, manifest);
+        check(
+          "every screen of one export carries one design-system name, taken from the _ds folder",
+          docs[0].designSystem?.name === "Acme Design System" &&
+            docs[1].designSystem?.name === "Acme Design System",
+          JSON.stringify(docs.map((d) => d.designSystem?.name)),
+        );
+
+        // The priority order, at the boundary each rung is reached from. The
+        // folder beats the namespace because "AcmeDesignSystem_3f2a9c" is a
+        // stable key, not a label anybody wants in the variables panel; a
+        // manifest that declares a `name` beats both because that is the
+        // designer saying it outright.
+        const declared = JSON.stringify({
+          ...JSON.parse(manifest),
+          name: "Acme, the good one",
+        });
+        check(
+          "a name the manifest declares outright wins over the folder",
+          panel.designSystemName(files, declared) === "Acme, the good one",
+          JSON.stringify(panel.designSystemName(files, declared)),
+        );
+        check(
+          "with no _ds folder the manifest's namespace is the last resort, and no export at all has no name",
+          panel.designSystemName([files[0]], manifest) === "AcmeDesignSystem_3f2a9c" &&
+            panel.designSystemName([files[0]], undefined) === undefined &&
+            panel.designSystemName([], "{not json") === undefined,
+          `${JSON.stringify(panel.designSystemName([files[0]], manifest))} / ` +
+            `${JSON.stringify(panel.designSystemName([files[0]], undefined))}`,
+        );
+
+        // A document with no design system in it must not gain one. The batch
+        // loop writes onto `doc.designSystem`, which is absent for a screen
+        // whose export shipped no tokens at all.
+        const bare = { name: "Bare", root: {}, warnings: [] };
+        panel.nameDesignSystems([bare], files, manifest);
+        check(
+          "a screen carrying no design system is left without one",
+          bare.designSystem === undefined,
+          JSON.stringify(bare.designSystem ?? null),
+        );
+      }
+
+      /**
+       * The iso-export fixture as a `File[]`, shaped like a real drop.
+       *
+       * `webkitRelativePath` is a read-only getter on File.prototype, so it is
+       * defined on the instance, exactly as src/ui/zip.ts does it for a zip
+       * entry. `collectDsTokenCss` and `inlineAssets` both key off it.
+       *
+       * The two font files are counted as they are read, which is how the memo
+       * that keeps a 2.6 MB export from being base64'd once per screen gets
+       * asserted, and how "the decoy was never touched" gets said in numbers.
+       */
+      const isoFontReads = { system: 0, decoy: 0 };
+
+      async function isoExportFiles() {
+        const paths = [
+          "panel.dc.html",
+          "board.dc.html",
+          "decoy.dc.html",
+          "decoy.css",
+          "_ds/iso-design-system-0000/tokens/fonts.css",
+          "_ds/iso-design-system-0000/tokens/tokens.css",
+          "_ds/iso-design-system-0000/fonts/iso-text.ttf",
+          "fonts/iso-text.ttf",
+        ];
+        const files = [];
+        for (const path of paths) {
+          const bytes = await (await fetch(`iso-export/${path}`)).arrayBuffer();
+          const file = new File([bytes], path.split("/").pop());
+          Object.defineProperty(file, "webkitRelativePath", {
+            value: `iso-export/${path}`,
+          });
+          if (path.endsWith(".ttf")) {
+            const which = path.includes("_ds") ? "system" : "decoy";
+            const read = file.arrayBuffer.bind(file);
+            file.arrayBuffer = () => {
+              isoFontReads[which] += 1;
+              return read();
+            };
+          }
+          files.push(file);
+        }
+        // Both documents link the same stylesheet, so inlining both is what
+        // proves the font behind it is encoded once rather than once per
+        // screen. Done here so the count is settled before anything reads it.
+        await window.loadPanel().then(async (panel) => {
+          await panel.inlinedDocument(files[0], files);
+          await panel.inlinedDocument(files[1], files);
+        });
+        return files;
+      }
+    </script>
+  </body>
+</html>

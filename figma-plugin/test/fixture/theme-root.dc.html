@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Root re-theme fixture</title>
+    <style>
+      /* The shape Claude Design writes by default since September 2026: the
+         light theme on :root, the dark one on :root[data-theme="dark"], and a
+         script that sets data-theme from a `theme` prop defaulting to
+         "system". Before root re-themes were read, the base layer held light,
+         the page rendered dark on a dark OS, and a real export bound 0 of its
+         84 layers. */
+      :root {
+        --rt-canvas: rgb(247, 245, 240);
+        --rt-ink: rgb(35, 37, 35);
+        --rt-accent: rgb(181, 68, 38);
+        --rt-line: rgb(215, 216, 208);
+      }
+      :root[data-theme="dark"] {
+        --rt-canvas: rgb(25, 27, 25);
+        --rt-ink: rgb(240, 240, 233);
+        --rt-accent: rgb(241, 160, 132);
+        --rt-line: rgb(65, 72, 63);
+      }
+    </style>
+  </head>
+  <body>
+    <x-dc>
+      <div data-name="Page" style="width: 320px; padding: 16px; background: var(--rt-canvas); display: flex; flex-direction: column; gap: 8px">
+        <div data-name="Accent swatch" style="height: 20px; background: var(--rt-accent)"></div>
+        <!-- A literal, not a var(): the dark accent written out. It matches the
+             Dark mode's value and nothing in the base layer. -->
+        <div data-name="Dark literal swatch" style="height: 20px; background: rgb(241, 160, 132)"></div>
+        <div data-name="Ink swatch" style="height: 20px; background: var(--rt-ink)"></div>
+        <div data-name="Line swatch" style="height: 20px; background: var(--rt-line)"></div>
+      </div>
+    </x-dc>
+    <script type="text/x-dc" data-dc-script>
+      class Component extends DCLogic {
+        state = { theme: "dark" };
+        componentDidMount() {
+          if (window.__rtApplyTheme) {
+            document.documentElement.setAttribute("data-theme", this.state.theme);
+          }
+        }
+        renderVals() {
+          return {};
+        }
+      }
+    </script>
+  </body>
+</html>
