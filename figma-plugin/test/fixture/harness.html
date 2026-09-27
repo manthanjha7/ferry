@@ -979,6 +979,45 @@
           `surfaces=${JSON.stringify(pairDoc.designSystem?.surfaces)}`,
         );
 
+        // --- Entrance motion (test/fixture/motion.dc.html) ----------------------
+        // Measured offscreen and on the first frame, a real portfolio imported
+        // 28 of 48 text layers at opacity 0 and every nav link as a solid block.
+        const motionDoc = await window.extractDocument(
+          await (await fetch("motion.dc.html")).text(),
+          "Motion",
+          { viewportWidth: 400 },
+        );
+        const entrance = findByName(motionDoc.root, "Entrance");
+        check(
+          "an entrance animation is measured at its end state, not its first frame",
+          entrance?.opacity === 1,
+          `opacity=${entrance?.opacity}`,
+        );
+        check(
+          "scroll-reveal content imports visible, including elements observed by a later pass",
+          findByName(motionDoc.root, "Revealed line")?.opacity === 1 &&
+            findByName(motionDoc.root, "Late revealed line")?.opacity === 1,
+          `first=${findByName(motionDoc.root, "Revealed line")?.opacity} ` +
+            `late=${findByName(motionDoc.root, "Late revealed line")?.opacity}`,
+        );
+        const gradientFills = (name) =>
+          (findByName(motionDoc.root, name)?.fills ?? []).filter((f) => f.type.startsWith("GRADIENT")).length;
+        check(
+          "a zero-sized or strip gradient paints nothing, a full one still imports",
+          gradientFills("Underlined link") === 0 &&
+            gradientFills("Strip gradient") === 0 &&
+            gradientFills("Full gradient") === 1 &&
+            motionDoc.warnings.some((w) => w.includes("only part of an element")),
+          `link=${gradientFills("Underlined link")} strip=${gradientFills("Strip gradient")} ` +
+            `full=${gradientFills("Full gradient")} warnings=${JSON.stringify(motionDoc.warnings)}`,
+        );
+        check(
+          "the document's IntersectionObserver swap and its attributes do not outlive the import",
+          !document.documentElement.hasAttribute("data-mx-ready") &&
+            /native code/.test(String(window.IntersectionObserver)),
+          `ready=${document.documentElement.hasAttribute("data-mx-ready")}`,
+        );
+
         // --- Two screens of one export that disagree (divergent-a/b.html) ------
         // The premise the sandbox half of this story rests on, measured rather
         // than assumed: two Claude Design documents can declare one token name

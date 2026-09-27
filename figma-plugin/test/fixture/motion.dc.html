@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Entrance motion fixture</title>
+    <style>
+      /* Three idioms from a real September 2026 Claude Design portfolio, each of
+         which imported wrong: an entrance animation measured on its first
+         frame, scroll-reveal content that stays hidden offscreen, and an
+         animated underline painted as a solid block. */
+      @keyframes mx-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+      html[data-mx-ready] [data-mx-reveal]:not(.in) { opacity: 0; }
+      [data-mx-underline] {
+        background-image: linear-gradient(currentColor, currentColor);
+        background-repeat: no-repeat;
+        background-position: 0 100%;
+        background-size: 0 1px;
+      }
+    </style>
+  </head>
+  <body>
+    <x-dc>
+      <main data-name="Entrance" style="width: 320px; display: flex; flex-direction: column; gap: 8px; animation: mx-rise .5s ease both">
+        <p data-name="Revealed line" data-mx-reveal style="margin: 0; background: #eeeeee">Hidden until scrolled into view</p>
+        <p data-name="Late revealed line" data-mx-reveal style="margin: 0; background: #eeeeee">Observed by a second pass</p>
+        <a data-name="Underlined link" data-mx-underline style="color: #b54426">Work</a>
+        <div data-name="Strip gradient" style="height: 20px; background-image: linear-gradient(#0d99ff, #0d99ff); background-repeat: no-repeat; background-size: 100% 2px"></div>
+        <div data-name="Full gradient" style="height: 20px; background: linear-gradient(#0d99ff, #1e1e1e)"></div>
+      </main>
+    </x-dc>
+    <script type="text/x-dc" data-dc-script>
+      class Component extends DCLogic {
+        componentDidMount() {
+          // Wired late, the way the real export does it, once the markup is in
+          // the page. A reveal callback observes more elements, which is what
+          // lost the lower half of the real page to a single timer.
+          setTimeout(() => {
+            const els = document.querySelectorAll("[data-mx-reveal]");
+            if (!els.length) return;
+            document.documentElement.setAttribute("data-mx-ready", "");
+            const io = new IntersectionObserver((entries) => {
+              entries.forEach((e) => {
+                if (!e.isIntersecting) return;
+                e.target.classList.add("in");
+                io.unobserve(e.target);
+                if (e.target === els[0]) io.observe(els[1]);
+              });
+            });
+            io.observe(els[0]);
+          }, 0);
+        }
+        renderVals() {
+          return {};
+        }
+      }
+    </script>
+  </body>
+</html>

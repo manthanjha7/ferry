@@ -1141,7 +1141,7 @@
             load?" is otherwise unanswerable from inside the panel. This stamp
             makes it a glance. build.mjs substitutes it.
           -->
-          <br />build 2026-09-27 20:16:56
+          <br />build 2026-09-27 21:52:26
         </div>
       </div>
     </div>
@@ -3089,6 +3089,7 @@ return Component;`
     ].join(";");
     const parsed = new DOMParser().parseFromString(preprocessTableSafeMarkup(html), "text/html");
     const host = snapshotHost();
+    const reveal = revealEverything();
     const resolveReport = await resolveDynamicDocument(parsed, {
       moduleSources: options.moduleSources,
       documentSources: options.documentSources,
@@ -3123,6 +3124,7 @@ return Component;`
     document.body.appendChild(container);
     await waitForStylesheets(adopted);
     await waitForAssets(container);
+    await settleMotion(container, adopted, reveal.flush);
     return {
       container,
       root: container,
@@ -3134,8 +3136,113 @@ return Component;`
         container.remove();
         for (const node of adopted) node.remove();
         restoreHost(host);
+        reveal.restore();
       }
     };
+  }
+  function revealEverything() {
+    const original = window.IntersectionObserver;
+    if (!original) return { flush: () => {
+    }, restore: () => {
+    } };
+    const observers = /* @__PURE__ */ new Set();
+    class RevealAll {
+      constructor(callback) {
+        this.callback = callback;
+        this.root = null;
+        this.rootMargin = "0px";
+        this.thresholds = [0];
+        /** Observed and not yet told. A timer alone lost the lower half of a page. */
+        this.pending = /* @__PURE__ */ new Set();
+        observers.add(this);
+      }
+      observe(target) {
+        this.pending.add(target);
+        setTimeout(() => this.deliver(), 0);
+      }
+      unobserve(target) {
+        this.pending.delete(target);
+      }
+      disconnect() {
+        this.pending.clear();
+        observers.delete(this);
+      }
+      takeRecords() {
+        return [];
+      }
+      deliver() {
+        if (this.pending.size === 0) return;
+        const entries = Array.from(this.pending).map((target) => {
+          const rect = target.getBoundingClientRect();
+          return {
+            target,
+            isIntersecting: true,
+            intersectionRatio: 1,
+            boundingClientRect: rect,
+            intersectionRect: rect,
+            rootBounds: null,
+            time: performance.now()
+          };
+        });
+        this.pending.clear();
+        try {
+          this.callback(entries, this);
+        } catch (e) {
+        }
+      }
+    }
+    window.IntersectionObserver = RevealAll;
+    return {
+      // Deliver until quiet: a reveal callback can observe more elements.
+      flush: () => {
+        for (let round2 = 0; round2 < 5; round2++) {
+          const busy = Array.from(observers).filter((o) => o.pending.size > 0);
+          if (busy.length === 0) return;
+          for (const observer of busy) observer.deliver();
+        }
+      },
+      restore: () => {
+        window.IntersectionObserver = original;
+      }
+    };
+  }
+  async function settleMotion(container, adopted, flushReveals) {
+    var _a, _b;
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+    await tick();
+    await tick();
+    flushReveals();
+    for (const node of adopted) {
+      const sheet = node.sheet;
+      if (sheet) preferReducedMotion(sheet.cssRules);
+    }
+    for (const animation of document.getAnimations()) {
+      const target = (_a = animation.effect) == null ? void 0 : _a.target;
+      if (!target || !container.contains(target)) continue;
+      try {
+        const end = (_b = animation.effect) == null ? void 0 : _b.getComputedTiming().endTime;
+        if (typeof end === "number" && Number.isFinite(end)) animation.finish();
+        else animation.cancel();
+      } catch (e) {
+      }
+    }
+  }
+  function preferReducedMotion(rules) {
+    let list;
+    try {
+      list = Array.from(rules != null ? rules : []);
+    } catch (e) {
+      return;
+    }
+    for (const rule of list) {
+      const media = rule.media;
+      if (media) {
+        const text = media.mediaText;
+        if (/prefers-reduced-motion\s*:\s*reduce/i.test(text)) media.mediaText = "all";
+        else if (/prefers-reduced-motion\s*:\s*no-preference/i.test(text)) media.mediaText = "not all";
+      }
+      preferReducedMotion(rule.cssRules);
+    }
   }
   function snapshotHost() {
     return [document.documentElement, document.body].map((el2) => ({
@@ -4321,8 +4428,13 @@ return Component;`
     const image = style.backgroundImage;
     if (image && image !== "none") {
       const gradient = parseLinearGradient(image);
-      if (gradient) {
+      const coverage = gradient ? backgroundCoverage(el2, style) : "full";
+      if (gradient && coverage === "full") {
         paints.push(gradient);
+      } else if (gradient && coverage === "partial") {
+        const note = "A background gradient drawn on only part of an element (an underline, for example) was left out.";
+        if (!ctx.warnings.includes(note)) ctx.warnings.push(note);
+      } else if (gradient) {
       } else if (image.startsWith("url(")) {
         ctx.warnings.push(
           `CSS background image on <${el2.tagName.toLowerCase()}> was not imported (use an <img> for it to come across).`
@@ -4622,7 +4734,30 @@ return Component;`
   function isPainted(style) {
     const color = parseColor(style.backgroundColor);
     if (color && color.a > 0) return true;
-    return !!style.backgroundImage && style.backgroundImage !== "none";
+    if (!style.backgroundImage || style.backgroundImage === "none") return false;
+    return !zeroSized(style.backgroundSize);
+  }
+  function zeroSized(size) {
+    var _a, _b;
+    const first = (_b = (_a = splitTopLevel2(size || "auto")[0]) == null ? void 0 : _a.trim()) != null ? _b : "auto";
+    return first.split(/\s+/).some((part) => /^0(?:px|%)?$/.test(part));
+  }
+  function backgroundCoverage(el2, style) {
+    var _a, _b, _c;
+    if (zeroSized(style.backgroundSize)) return "none";
+    const first = (_b = (_a = splitTopLevel2(style.backgroundSize || "auto")[0]) == null ? void 0 : _a.trim()) != null ? _b : "auto";
+    if (/^(auto|cover|contain)$/.test(first) || first === "auto auto") return "full";
+    const repeat = ((_c = splitTopLevel2(style.backgroundRepeat || "repeat")[0]) != null ? _c : "repeat").trim();
+    if (repeat === "repeat" || repeat === "repeat repeat" || repeat === "round" || repeat === "space") {
+      return "full";
+    }
+    const rect = el2.getBoundingClientRect();
+    const [w, h = "auto"] = first.split(/\s+/);
+    const resolve = (part, box) => part === "auto" ? box : part.endsWith("%") ? parseFloat(part) / 100 * box : parseFloat(part);
+    const width = resolve(w, rect.width);
+    const height = resolve(h, rect.height);
+    if (!(width > 0) || !(height > 0)) return "none";
+    return width >= rect.width - 0.5 && height >= rect.height - 0.5 ? "full" : "partial";
   }
   function hasVisibleBorder(style) {
     return px(style.borderTopWidth) > 0 || px(style.borderRightWidth) > 0 || px(style.borderBottomWidth) > 0 || px(style.borderLeftWidth) > 0;

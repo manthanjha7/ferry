@@ -182,6 +182,7 @@ export async function mountDocument(
   // dispose; what it set is still in place while this document is measured,
   // because that is the theme it chose to render in.
   const host = snapshotHost();
+  const reveal = revealEverything();
   const resolveReport = await resolveDynamicDocument(parsed, {
     moduleSources: options.moduleSources,
     documentSources: options.documentSources,
@@ -231,6 +232,7 @@ export async function mountDocument(
   // colour resolves as a bare literal and the whole binding feature no-ops.
   await waitForStylesheets(adopted);
   await waitForAssets(container);
+  await settleMotion(container, adopted, reveal.flush);
 
   return {
     container,
@@ -243,8 +245,142 @@ export async function mountDocument(
       container.remove();
       for (const node of adopted) node.remove();
       restoreHost(host);
+      reveal.restore();
     },
   };
+}
+
+/**
+ * Report every observed element as on screen while a document is measured.
+ *
+ * Scroll-reveal is everywhere in Claude Design output: content sits at
+ * `opacity: 0` until an IntersectionObserver sees it and adds a class. The
+ * stage is parked offscreen, so nothing is ever seen, and a real portfolio
+ * imported with 28 of its 48 text layers invisible. What a designer wants in
+ * Figma is the page as it looks once you have scrolled through it.
+ */
+function revealEverything(): { flush: () => void; restore: () => void } {
+  const original = window.IntersectionObserver;
+  if (!original) return { flush: () => {}, restore: () => {} };
+
+  const observers = new Set<RevealAll>();
+
+  class RevealAll {
+    readonly root = null;
+    readonly rootMargin = "0px";
+    readonly thresholds = [0];
+    /** Observed and not yet told. A timer alone lost the lower half of a page. */
+    pending = new Set<Element>();
+    constructor(private callback: IntersectionObserverCallback) {
+      observers.add(this);
+    }
+    observe(target: Element): void {
+      this.pending.add(target);
+      setTimeout(() => this.deliver(), 0);
+    }
+    unobserve(target: Element): void {
+      this.pending.delete(target);
+    }
+    disconnect(): void {
+      this.pending.clear();
+      observers.delete(this);
+    }
+    takeRecords(): IntersectionObserverEntry[] {
+      return [];
+    }
+    deliver(): void {
+      if (this.pending.size === 0) return;
+      const entries = Array.from(this.pending).map((target) => {
+        const rect = target.getBoundingClientRect();
+        return {
+          target,
+          isIntersecting: true,
+          intersectionRatio: 1,
+          boundingClientRect: rect,
+          intersectionRect: rect,
+          rootBounds: null,
+          time: performance.now(),
+        } as unknown as IntersectionObserverEntry;
+      });
+      this.pending.clear();
+      try {
+        this.callback(entries, this as unknown as IntersectionObserver);
+      } catch {
+        // The document's own reveal code failing is its problem, not the import's.
+      }
+    }
+  }
+
+  (window as { IntersectionObserver: unknown }).IntersectionObserver = RevealAll;
+  return {
+    // Deliver until quiet: a reveal callback can observe more elements.
+    flush: () => {
+      for (let round = 0; round < 5; round++) {
+        const busy = Array.from(observers).filter((o) => o.pending.size > 0);
+        if (busy.length === 0) return;
+        for (const observer of busy) observer.deliver();
+      }
+    },
+    restore: () => {
+      window.IntersectionObserver = original;
+    },
+  };
+}
+
+/**
+ * Measure the page at rest, not mid-entrance.
+ *
+ * `<main style="animation: riseIn .5s both">` is measured on its first frame,
+ * at opacity 0, and so is anything a reveal class starts transitioning in. So:
+ * let the reveal callbacks run, take the document's own reduced-motion rules
+ * (which is exactly "this page without its motion", written by its author),
+ * then jump every finite animation and transition to its end state. Looping
+ * ones are cancelled back to their resting style.
+ */
+async function settleMotion(
+  container: HTMLElement,
+  adopted: Element[],
+  flushReveals: () => void,
+): Promise<void> {
+  const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+  await tick();
+  await tick();
+  flushReveals();
+
+  for (const node of adopted) {
+    const sheet = (node as HTMLStyleElement | HTMLLinkElement).sheet;
+    if (sheet) preferReducedMotion(sheet.cssRules);
+  }
+
+  for (const animation of document.getAnimations()) {
+    const target = (animation.effect as KeyframeEffect | null)?.target;
+    if (!target || !container.contains(target)) continue;
+    try {
+      const end = animation.effect?.getComputedTiming().endTime;
+      if (typeof end === "number" && Number.isFinite(end)) animation.finish();
+      else animation.cancel();
+    } catch {
+      // A finish() the browser refuses leaves that one element mid-motion.
+    }
+  }
+}
+
+function preferReducedMotion(rules: CSSRuleList | null | undefined): void {
+  let list: CSSRule[];
+  try {
+    list = Array.from(rules ?? []);
+  } catch {
+    return; // Cross-origin stylesheet.
+  }
+  for (const rule of list) {
+    const media = (rule as CSSMediaRule).media;
+    if (media) {
+      const text = media.mediaText;
+      if (/prefers-reduced-motion\s*:\s*reduce/i.test(text)) media.mediaText = "all";
+      else if (/prefers-reduced-motion\s*:\s*no-preference/i.test(text)) media.mediaText = "not all";
+    }
+    preferReducedMotion((rule as CSSGroupingRule).cssRules);
+  }
 }
 
 type HostSnapshot = Array<{ el: Element; attrs: Map<string, string> }>;
@@ -2279,8 +2415,19 @@ function backgroundPaints(
   const image = style.backgroundImage;
   if (image && image !== "none") {
     const gradient = parseLinearGradient(image);
-    if (gradient) {
+    const coverage = gradient ? backgroundCoverage(el, style) : "full";
+    if (gradient && coverage === "full") {
       paints.push(gradient);
+    } else if (gradient && coverage === "partial") {
+      // A Figma fill always covers the whole layer, so a gradient sized to part
+      // of the box (the `100% 1px` underline idiom) would paint all of it.
+      const note =
+        "A background gradient drawn on only part of an element (an underline, for example) was left out.";
+      if (!ctx.warnings.includes(note)) ctx.warnings.push(note);
+    } else if (gradient) {
+      // Zero-sized: the animated-underline idiom at rest, `background-size: 0
+      // 1px` grown on hover. Painting it filled every nav link with a solid
+      // block of its text colour.
     } else if (image.startsWith("url(")) {
       // Resolved asynchronously would complicate the walk; note it instead.
       ctx.warnings.push(
@@ -2763,7 +2910,45 @@ function allChildrenInline(el: HTMLElement): boolean {
 function isPainted(style: CSSStyleDeclaration): boolean {
   const color = parseColor(style.backgroundColor);
   if (color && color.a > 0) return true;
-  return !!style.backgroundImage && style.backgroundImage !== "none";
+  if (!style.backgroundImage || style.backgroundImage === "none") return false;
+  return !zeroSized(style.backgroundSize);
+}
+
+/** `0px 1px`, `0% 100%`: a background layer that paints nothing. First layer only. */
+function zeroSized(size: string): boolean {
+  const first = splitTopLevel(size || "auto")[0]?.trim() ?? "auto";
+  return first.split(/\s+/).some((part) => /^0(?:px|%)?$/.test(part));
+}
+
+/**
+ * How much of the box the first background layer actually paints.
+ *
+ * `auto`, `cover`, `contain` and anything at least the box's size count as the
+ * whole box, as does a layer that repeats on both axes. A zero on either axis
+ * paints nothing. Everything else is a strip or a patch, which a Figma fill
+ * cannot express.
+ */
+function backgroundCoverage(
+  el: HTMLElement,
+  style: CSSStyleDeclaration,
+): "full" | "partial" | "none" {
+  if (zeroSized(style.backgroundSize)) return "none";
+  const first = splitTopLevel(style.backgroundSize || "auto")[0]?.trim() ?? "auto";
+  if (/^(auto|cover|contain)$/.test(first) || first === "auto auto") return "full";
+
+  const repeat = (splitTopLevel(style.backgroundRepeat || "repeat")[0] ?? "repeat").trim();
+  if (repeat === "repeat" || repeat === "repeat repeat" || repeat === "round" || repeat === "space") {
+    return "full";
+  }
+
+  const rect = el.getBoundingClientRect();
+  const [w, h = "auto"] = first.split(/\s+/);
+  const resolve = (part: string, box: number): number =>
+    part === "auto" ? box : part.endsWith("%") ? (parseFloat(part) / 100) * box : parseFloat(part);
+  const width = resolve(w, rect.width);
+  const height = resolve(h, rect.height);
+  if (!(width > 0) || !(height > 0)) return "none";
+  return width >= rect.width - 0.5 && height >= rect.height - 0.5 ? "full" : "partial";
 }
 
 function hasVisibleBorder(style: CSSStyleDeclaration): boolean {
