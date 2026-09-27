@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Stress: every pattern that can break an import</title>
+<style>
+  body { margin: 0; font-family: Inter, sans-serif; }
+  .vw-title { font-size: 5vw; margin: 0; }
+  .hero { height: 100vh; background: #eef; }
+  @media (max-width: 800px) { .responsive { background: rgb(255, 0, 0); } }
+  @media (min-width: 801px) { .responsive { background: rgb(0, 128, 0); } }
+  .pseudo::before { content: "★"; color: rgb(255, 0, 0); margin-right: 4px; }
+  .pseudo::after { content: ""; display: block; height: 4px; background: rgb(0, 0, 255); }
+  .rotated { transform: rotate(12deg); width: 100px; height: 40px; background: #fc0; }
+  .scaled { transform: scale(0.5); width: 200px; height: 40px; background: #0cf; }
+  .clip-text { background: linear-gradient(90deg, red, blue); -webkit-background-clip: text; background-clip: text; color: transparent; font-size: 24px; }
+  .stack { position: relative; height: 60px; }
+  .stack .a { position: absolute; inset: 0; background: rgb(255, 0, 0); z-index: 2; }
+  .stack .b { position: absolute; inset: 0; background: rgb(0, 0, 255); z-index: 1; }
+  .ellipsis { width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .clamp { width: 160px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  @keyframes marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+  .marquee { animation: marquee 10s linear infinite; white-space: nowrap; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner { width: 20px; height: 20px; border: 3px solid #333; border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; }
+  @keyframes pop { from { transform: scale(0); } to { transform: scale(1); } }
+  .pop { animation: pop .4s ease-out 2s backwards; width: 80px; height: 30px; background: #9c6; }
+  .sticky { position: sticky; top: 0; background: #ddd; }
+  .fixed { position: fixed; bottom: 0; right: 0; width: 80px; height: 30px; background: #f0f; }
+</style>
+</head>
+<body>
+  <h1 data-name="VW title" class="vw-title">Viewport sized</h1>
+  <div data-name="Hero 100vh" class="hero">hero</div>
+  <div data-name="Responsive" class="responsive" style="height:20px"></div>
+  <p data-name="Pseudo" class="pseudo">Starred label</p>
+  <div data-name="Rotated" class="rotated"></div>
+  <div data-name="Scaled" class="scaled"></div>
+  <p data-name="Clip text" class="clip-text">Gradient text</p>
+  <div data-name="Stack" class="stack"><div data-name="Top A" class="a"></div><div data-name="Under B" class="b"></div></div>
+  <p data-name="Ellipsis" class="ellipsis">This is a long line that should be truncated</p>
+  <p data-name="Clamp" class="clamp">Line one of text that wraps. Line two continues here. Line three should be hidden entirely.</p>
+  <div data-name="Marquee" class="marquee">NEWS · NEWS · NEWS · NEWS</div>
+  <div data-name="Spinner" class="spinner"></div>
+  <div data-name="Pop" class="pop"></div>
+  <div data-name="Sticky" class="sticky">sticky header</div>
+  <div data-name="Fixed" class="fixed"></div>
+  <canvas data-name="Chart canvas" width="200" height="80"></canvas>
+  <img data-name="Lazy image" loading="lazy" width="40" height="40" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40'><rect width='40' height='40' fill='orange'/></svg>" />
+  <div data-name="Counter" id="counter">0</div>
+  <div data-name="Typewriter" id="typer"></div>
+</body>
+</html>

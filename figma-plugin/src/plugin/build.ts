@@ -1002,7 +1002,35 @@ async function buildFrame(node: IRNode, ctx: BuildCtx): Promise<FrameNode> {
     }
   }
 
+  for (let i = 0; i < built.length; i++) {
+    if (builtIr[i].rotation) rotateInPlace(built[i], builtIr[i], !node.layout || !!builtIr[i].absolute);
+  }
+
   return frame;
+}
+
+/**
+ * Turn a layer by the CSS angle, around its centre as CSS does.
+ *
+ * The IR gives the upright box placed with its centre where the rotated box's
+ * centre was. Figma rotates about the layer's top-left and counts
+ * anticlockwise, so the angle is negated and the top-left moved to where the
+ * turned corner lands. Inside auto-layout the parent owns position, so only
+ * the angle is set.
+ */
+function rotateInPlace(node: SceneNode, ir: IRNode, positioned: boolean): void {
+  const turnable = node as SceneNode & { rotation: number };
+  try {
+    turnable.rotation = -ir.rotation;
+    if (!positioned) return;
+    const a = (ir.rotation * Math.PI) / 180;
+    const cx = ir.x + ir.width / 2;
+    const cy = ir.y + ir.height / 2;
+    node.x = cx - (ir.width / 2) * Math.cos(a) + (ir.height / 2) * Math.sin(a);
+    node.y = cy - (ir.width / 2) * Math.sin(a) - (ir.height / 2) * Math.cos(a);
+  } catch {
+    // Not every node type rotates; it stays upright at its box.
+  }
 }
 
 /**
@@ -1120,6 +1148,25 @@ async function buildText(node: IRNode, ctx: BuildCtx): Promise<TextNode | null> 
   // the lesser distortion. Genuinely wrapped text keeps its measured width so
   // its line breaks survive.
   text.textAutoResize = spec.singleLine ? "WIDTH_AND_HEIGHT" : "HEIGHT";
+
+  // Truncated in the source (ellipsis, line-clamp): the box keeps its width and
+  // Figma cuts the text itself, instead of the full string spilling out.
+  if (spec.maxLines) {
+    try {
+      text.textAutoResize = "HEIGHT";
+      text.resize(Math.max(node.width, 1), Math.max(node.height, 1));
+      text.textTruncation = "ENDING";
+      text.maxLines = spec.maxLines;
+    } catch {
+      // An older Figma without truncation shows the whole text.
+    }
+  }
+
+  // Gradient text: the glyphs carry the gradient, not a box behind them.
+  if (spec.glyphFill) {
+    const glyph = toFigmaPaint(spec.glyphFill, ctx);
+    if (glyph) text.fills = [glyph];
+  }
 
   applyEffects(text, node);
   return text;

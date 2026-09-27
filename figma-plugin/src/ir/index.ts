@@ -142,6 +142,17 @@ export type IRText = {
    * lets the builder keep it one line.
    */
   singleLine: boolean;
+  /**
+   * Lines shown before the rest is cut off with an ellipsis: 1 for
+   * `text-overflow: ellipsis` on one line, N for `-webkit-line-clamp: N`.
+   * Absent means the whole text shows. Built as Figma's own truncation.
+   */
+  maxLines?: number;
+  /**
+   * A paint for the glyphs themselves, from `background-clip: text` (gradient
+   * text). Replaces the per-run fills, which are transparent in that idiom.
+   */
+  glyphFill?: IRPaint;
   /** Typography token matched on the dominant run, if any. */
   styleToken?: TokenRef;
 };

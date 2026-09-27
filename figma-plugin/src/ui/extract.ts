@@ -183,6 +183,8 @@ export async function mountDocument(
   // because that is the theme it chose to render in.
   const host = snapshotHost();
   const reveal = revealEverything();
+  const viewport = { width: options.viewportWidth, height: designViewportHeight(options.viewportWidth) };
+  const restoreWindowSize = reportDesignViewport(viewport);
   const resolveReport = await resolveDynamicDocument(parsed, {
     moduleSources: options.moduleSources,
     documentSources: options.documentSources,
@@ -222,6 +224,10 @@ export async function mountDocument(
   }
 
   const imageSlots = stubImageSlots(parsed);
+  // An offscreen lazy image may never be judged near the viewport, so never loads.
+  for (const img of Array.from(parsed.querySelectorAll("img[loading='lazy'], iframe[loading='lazy']"))) {
+    img.setAttribute("loading", "eager");
+  }
 
   const source = parsed.querySelector("x-dc") ?? parsed.body;
   container.innerHTML = source.innerHTML;
@@ -231,8 +237,10 @@ export async function mountDocument(
   // has to have finished loading before anything is measured — otherwise every
   // colour resolves as a bare literal and the whole binding feature no-ops.
   await waitForStylesheets(adopted);
+  emulateViewport(container, adopted, viewport);
   await waitForAssets(container);
   await settleMotion(container, adopted, reveal.flush);
+  materializePseudoElements(container);
 
   return {
     container,
@@ -246,6 +254,7 @@ export async function mountDocument(
       for (const node of adopted) node.remove();
       restoreHost(host);
       reveal.restore();
+      restoreWindowSize();
     },
   };
 }
@@ -364,6 +373,18 @@ async function settleMotion(
   for (const animation of document.getAnimations()) {
     const target = (animation.effect as KeyframeEffect | null)?.target;
     if (!target || !container.contains(target)) continue;
+    // Scroll-driven (`animation-timeline: view()`): progress is a scroll
+    // position the offscreen stage never has, and "finish" has no meaning.
+    // Cancelled, the element shows its resting style, which is the look the
+    // animation was revealing.
+    if (animation.timeline && animation.timeline !== document.timeline) {
+      try {
+        animation.cancel();
+      } catch {
+        // Left as it was.
+      }
+      continue;
+    }
     try {
       const end = animation.effect?.getComputedTiming().endTime;
       if (typeof end === "number" && Number.isFinite(end)) animation.finish();
@@ -394,6 +415,492 @@ function preferReducedMotion(rules: CSSRuleList | null | undefined): void {
       // An @import of a cross-origin sheet throws the same way; skip that branch.
     }
   }
+}
+
+
+// ---------------------------------------------------------------------------
+// Transforms, stacking, truncation, media
+// ---------------------------------------------------------------------------
+
+/** The rotation in a computed transform, in degrees clockwise. 0 when there is none worth carrying. */
+function rotationOf(style: CSSStyleDeclaration): number {
+  const t = style.transform;
+  if (!t || t === "none") return 0;
+  const m = /^matrix\(([^)]+)\)$/.exec(t);
+  if (!m) return 0; // matrix3d: a 3D turn has no Figma equivalent; measured flat.
+  const [a, b] = m[1].split(",").map((v) => parseFloat(v));
+  const degrees = (Math.atan2(b, a) * 180) / Math.PI;
+  return Math.abs(degrees) < 0.05 ? 0 : Math.round(degrees * 100) / 100;
+}
+
+/** Turn an element's transform off for measuring, and hand back how to turn it on. */
+function suspendTransform(el: HTMLElement): () => void {
+  const value = el.style.getPropertyValue("transform");
+  const priority = el.style.getPropertyPriority("transform");
+  el.style.setProperty("transform", "none", "important");
+  return () => {
+    if (value) el.style.setProperty("transform", value, priority);
+    else el.style.removeProperty("transform");
+  };
+}
+
+/**
+ * Put absolutely-stacked children in paint order.
+ *
+ * Figma paints later children on top, and so does the DOM, until `z-index`
+ * says otherwise: a card whose badge is written first with `z-index: 2`
+ * imported with the badge underneath. Only positioned (or flex/grid) children
+ * take a z-index, `auto` counts as 0, and the sort is stable so equal layers
+ * keep DOM order. Only for absolute parents: reordering an auto-layout frame
+ * would reorder its flow.
+ */
+function orderByStacking(children: IRNode[], sources: Array<Element | null>): void {
+  const z = sources.map((source) => {
+    if (!source) return 0;
+    const cs = getComputedStyle(source);
+    const value = parseInt(cs.zIndex, 10);
+    return Number.isFinite(value) ? value : 0;
+  });
+  if (z.every((value) => value === 0)) return;
+  const order = children.map((_, i) => i).sort((a, b) => z[a] - z[b] || a - b);
+  const sorted = order.map((i) => children[i]);
+  children.splice(0, children.length, ...sorted);
+}
+
+/** How many lines show before an ellipsis, when the CSS cuts text off. */
+function truncationOf(style: CSSStyleDeclaration): number | undefined {
+  const clamp = parseInt(style.getPropertyValue("-webkit-line-clamp") || style.getPropertyValue("line-clamp"), 10);
+  if (Number.isFinite(clamp) && clamp > 0) return clamp;
+  const clipsX = style.overflowX === "hidden" || style.overflowX === "clip";
+  if (style.textOverflow === "ellipsis" && clipsX && /nowrap|pre/.test(style.whiteSpace)) return 1;
+  return undefined;
+}
+
+/** A canvas's pixels, or a video's poster or current frame, as PNG bytes. */
+async function snapshotMedia(
+  el: HTMLCanvasElement | HTMLVideoElement,
+  ctx: Ctx,
+): Promise<Uint8Array | null> {
+  try {
+    if (el instanceof HTMLVideoElement) {
+      if (el.poster) {
+        const poster = await loadImage(el.poster, ctx);
+        if (poster) return poster;
+      }
+      if (el.readyState < 2 || !el.videoWidth) return null;
+      const canvas = document.createElement("canvas");
+      canvas.width = el.videoWidth;
+      canvas.height = el.videoHeight;
+      canvas.getContext("2d")?.drawImage(el, 0, 0);
+      return dataUrlBytes(canvas.toDataURL("image/png"));
+    }
+    if (!el.width || !el.height) return null;
+    return dataUrlBytes(el.toDataURL("image/png"));
+  } catch {
+    return null; // Tainted by a cross-origin image, or not decodable.
+  }
+}
+
+function dataUrlBytes(url: string): Uint8Array | null {
+  const comma = url.indexOf(",");
+  if (comma < 0 || !url.startsWith("data:image/png;base64")) return null;
+  const binary = atob(url.slice(comma + 1));
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.length > 100 ? bytes : null;
+}
+
+/**
+ * An SVG used as an image, as PNG bytes Figma can take.
+ *
+ * Figma's image fills accept PNG, JPEG, GIF and WebP only, so `<img
+ * src="logo.svg">` was "Could not read image". Drawn at 2x so it stays crisp.
+ */
+async function rasteriseSvg(src: string, width: number, height: number): Promise<Uint8Array | null> {
+  try {
+    const image = new Image();
+    image.decoding = "sync";
+    image.src = src;
+    await image.decode();
+    const w = Math.max(1, Math.round((width || image.naturalWidth || 64) * 2));
+    const h = Math.max(1, Math.round((height || image.naturalHeight || 64) * 2));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    canvas.getContext("2d")?.drawImage(image, 0, 0, w, h);
+    return dataUrlBytes(canvas.toDataURL("image/png"));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Turn `::before` / `::after` into real elements, so they are measured and
+ * imported like anything else.
+ *
+ * They carry a lot in AI-generated pages: icons and bullets (`content: "★"`),
+ * dividers and underlines (`content: ""` with a height and a background),
+ * badges, quote marks. None of them are in the DOM, so all of them were
+ * dropped. Each becomes a `<span>` with the pseudo-element's computed styles
+ * copied inline, and the original is switched off so it does not paint twice.
+ */
+const PSEUDO_PROPERTIES = [
+  "display", "position", "top", "right", "bottom", "left", "width", "height",
+  "min-width", "min-height", "max-width", "max-height", "box-sizing",
+  "margin-top", "margin-right", "margin-bottom", "margin-left",
+  "padding-top", "padding-right", "padding-bottom", "padding-left",
+  "background-color", "background-image", "background-size", "background-position",
+  "background-repeat", "background-clip",
+  "border-top-width", "border-right-width", "border-bottom-width", "border-left-width",
+  "border-top-style", "border-right-style", "border-bottom-style", "border-left-style",
+  "border-top-color", "border-right-color", "border-bottom-color", "border-left-color",
+  "border-top-left-radius", "border-top-right-radius", "border-bottom-right-radius", "border-bottom-left-radius",
+  "color", "font-family", "font-size", "font-weight", "font-style", "line-height",
+  "letter-spacing", "text-transform", "text-decoration-line", "text-align", "white-space",
+  "opacity", "transform", "transform-origin", "box-shadow", "z-index",
+  "flex-grow", "flex-shrink", "flex-basis", "align-self", "vertical-align", "order",
+];
+const SKIP_PSEUDO = new Set(["IMG", "INPUT", "TEXTAREA", "SELECT", "BR", "HR", "IFRAME", "VIDEO", "CANVAS", "OPTION", "svg"]);
+
+function materializePseudoElements(container: HTMLElement): void {
+  const hosts = Array.from(container.querySelectorAll<HTMLElement>("*"));
+  let marked = false;
+  for (const el of hosts) {
+    if (SKIP_PSEUDO.has(el.tagName) || el instanceof SVGElement) continue;
+    for (const which of ["before", "after"] as const) {
+      let cs: CSSStyleDeclaration;
+      try {
+        cs = getComputedStyle(el, `::${which}`);
+      } catch {
+        continue;
+      }
+      const content = cs.content;
+      if (!content || content === "none" || content === "normal") continue;
+      if (cs.display === "none") continue;
+      const text = pseudoText(content, el);
+      if (text === null) continue;
+
+      const span = document.createElement("span");
+      span.setAttribute("data-cd2f-pseudo", which);
+      span.setAttribute("data-name", `::${which}`);
+      const declarations: string[] = [];
+      for (const prop of PSEUDO_PROPERTIES) {
+        const value = cs.getPropertyValue(prop);
+        if (value) declarations.push(`${prop}:${value}`);
+      }
+      span.setAttribute("style", declarations.join(";"));
+      span.textContent = text;
+      if (which === "before") el.insertBefore(span, el.firstChild);
+      else el.appendChild(span);
+      el.setAttribute(`data-cd2f-no-${which}`, "");
+      marked = true;
+    }
+  }
+  if (marked) {
+    const off = document.createElement("style");
+    off.setAttribute("data-cd2f-pseudo-off", "");
+    off.textContent =
+      "[data-cd2f-no-before]::before{content:none!important}[data-cd2f-no-after]::after{content:none!important}";
+    container.appendChild(off);
+  }
+}
+
+/**
+ * An inline SVG as markup Figma will draw the way the page did.
+ *
+ * `outerHTML` alone lost two things every icon set relies on: `currentColor`,
+ * which Figma reads as black (so every `stroke="currentColor"` icon imported
+ * black), and fills or strokes set by CSS classes, which do not travel with the
+ * markup. `<use href="#icon">` sprites pointed at symbols outside the snippet.
+ */
+function serializeSvg(el: SVGSVGElement): string {
+  const clone = el.cloneNode(true) as SVGSVGElement;
+  const originals = [el, ...Array.from(el.querySelectorAll("*"))];
+  const copies = [clone, ...Array.from(clone.querySelectorAll("*"))];
+  for (let i = 0; i < originals.length && i < copies.length; i++) {
+    const cs = getComputedStyle(originals[i]);
+    const copy = copies[i];
+    for (const attr of ["fill", "stroke"] as const) {
+      const declared = copy.getAttribute(attr);
+      const computed = cs.getPropertyValue(attr);
+      if (declared && /currentcolor/i.test(declared)) copy.setAttribute(attr, cs.color);
+      else if (!declared && computed && computed !== "none" && i > 0 && /^(path|circle|rect|ellipse|line|polyline|polygon|text|g)$/i.test(copy.tagName)) {
+        copy.setAttribute(attr, computed);
+      }
+    }
+    const inline = copy.getAttribute("style");
+    if (inline && /currentcolor/i.test(inline)) copy.setAttribute("style", inline.replace(/currentcolor/gi, cs.color));
+  }
+  for (const use of Array.from(clone.querySelectorAll("use"))) {
+    const ref = (use.getAttribute("href") || use.getAttribute("xlink:href") || "").replace(/^#/, "");
+    const target = ref ? el.ownerDocument.getElementById(ref) : null;
+    if (!target) continue;
+    const g = el.ownerDocument.createElementNS("http://www.w3.org/2000/svg", "g");
+    for (const child of Array.from(target.childNodes)) g.appendChild(child.cloneNode(true));
+    use.replaceWith(g);
+  }
+  if (!clone.getAttribute("width")) clone.setAttribute("width", String(el.getBoundingClientRect().width));
+  if (!clone.getAttribute("height")) clone.setAttribute("height", String(el.getBoundingClientRect().height));
+  return clone.outerHTML.replace(/currentColor/g, getComputedStyle(el).color);
+}
+
+/** The text a `content` value paints, or null for what we cannot reproduce (images, counters). */
+function pseudoText(content: string, el: Element): string | null {
+  if (/url\(|counter|image-set|gradient/.test(content)) return null;
+  let out = "";
+  const token = /"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|attr\(\s*([\w-]+)\s*\)|(open-quote|close-quote|no-open-quote|no-close-quote)/g;
+  let match: RegExpExecArray | null;
+  let any = false;
+  while ((match = token.exec(content))) {
+    any = true;
+    if (match[1] !== undefined || match[2] !== undefined) {
+      out += (match[1] ?? match[2]).replace(/\\([0-9a-fA-F]{1,6})\s?/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16))).replace(/\\(.)/g, "$1");
+    } else if (match[3]) {
+      out += el.getAttribute(match[3]) ?? "";
+    } else if (match[4] === "open-quote") out += "\u201C";
+    else if (match[4] === "close-quote") out += "\u201D";
+  }
+  return any ? out : null;
+}
+
+// ---------------------------------------------------------------------------
+// Viewport emulation
+// ---------------------------------------------------------------------------
+
+/**
+ * The design's viewport height, for `vh` and height media queries.
+ *
+ * A Claude Design canvas has a width and no height, and `100vh` means "one
+ * screen" to its author. 16:10 is the laptop screen the width implies: 1440
+ * gives 900.
+ */
+function designViewportHeight(width: number): number {
+  return Math.round(width * 0.625);
+}
+
+type Viewport = { width: number; height: number };
+
+const VIEWPORT_UNIT = /(-?(?:\d+\.?\d*|\.\d+))(dvw|svw|lvw|vw|dvh|svh|lvh|vh|dvmin|svmin|lvmin|vmin|dvmax|svmax|lvmax|vmax)\b/g;
+
+/**
+ * Render the page at the design's size, not the plugin window's.
+ *
+ * The page is measured inside the plugin's own window: about 400x620 in Figma.
+ * Everything relative to the viewport resolved against that. `font-size: 5vw`
+ * came out 37.8px instead of 72, a `100vh` hero was squashed to the window, and
+ * `@media (max-width: 800px)` matched, so the MOBILE layout was measured
+ * inside a 1440px frame. The window cannot be resized to 1440x900, so the CSS
+ * is: viewport units become px for the design size, and every media query
+ * that asks about size is answered for the design size and pinned to `all` or
+ * `not all`. Queries about anything else (colour scheme, hover, motion) are
+ * left to the browser.
+ */
+function emulateViewport(container: HTMLElement, adopted: Element[], viewport: Viewport): void {
+  const sheets: CSSStyleSheet[] = [];
+  const owners = [...adopted, ...Array.from(container.querySelectorAll("style, link[rel~='stylesheet']"))];
+  for (const node of owners) {
+    const sheet = (node as HTMLStyleElement | HTMLLinkElement).sheet;
+    if (sheet) sheets.push(sheet);
+  }
+  for (const sheet of sheets) {
+    let rules: CSSRuleList;
+    try {
+      rules = sheet.cssRules;
+    } catch {
+      continue; // Cross-origin: nothing to rewrite, and nothing we could.
+    }
+    rewriteRules(rules, viewport);
+  }
+
+  for (const el of Array.from(container.querySelectorAll<HTMLElement>("[style]"))) {
+    const text = el.getAttribute("style") ?? "";
+    if (/v(w|h|min|max)\b/.test(text)) el.setAttribute("style", toPx(text, viewport));
+  }
+}
+
+function rewriteRules(rules: CSSRuleList, viewport: Viewport): void {
+  for (const rule of Array.from(rules)) {
+    try {
+      const media = (rule as CSSMediaRule).media;
+      if (media && rule.constructor.name !== "CSSImportRule") {
+        const verdict = evaluateMediaList(media.mediaText, viewport);
+        if (verdict !== null) media.mediaText = verdict ? "all" : "not all";
+      }
+      const style = (rule as CSSStyleRule).style;
+      if (style) {
+        for (let i = 0; i < style.length; i++) {
+          const prop = style[i];
+          const value = style.getPropertyValue(prop);
+          if (!VIEWPORT_UNIT.test(value)) continue;
+          VIEWPORT_UNIT.lastIndex = 0;
+          style.setProperty(prop, toPx(value, viewport), style.getPropertyPriority(prop));
+        }
+        VIEWPORT_UNIT.lastIndex = 0;
+      }
+      const nested = (rule as CSSGroupingRule).cssRules;
+      if (nested && nested.length > 0) rewriteRules(nested, viewport);
+    } catch {
+      // One rule the browser will not let us touch is one rule left as it was.
+    }
+  }
+}
+
+function toPx(value: string, viewport: Viewport): string {
+  return value.replace(VIEWPORT_UNIT, (_, n: string, unit: string) => {
+    const base = unit.replace(/^(d|s|l)/, "");
+    const size =
+      base === "vw"
+        ? viewport.width
+        : base === "vh"
+          ? viewport.height
+          : base === "vmin"
+            ? Math.min(viewport.width, viewport.height)
+            : Math.max(viewport.width, viewport.height);
+    return `${+((parseFloat(n) * size) / 100).toFixed(3)}px`;
+  });
+}
+
+/**
+ * true / false for a media query list that asks only about size (and media
+ * type), or null when it asks about anything else, which the browser keeps.
+ */
+function evaluateMediaList(text: string, viewport: Viewport): boolean | null {
+  const list = text.split(",").map((q) => q.trim()).filter(Boolean);
+  if (list.length === 0) return null;
+  let any = false;
+  for (const query of list) {
+    const verdict = evaluateMediaQuery(query, viewport);
+    if (verdict === null) return null;
+    if (verdict) any = true;
+  }
+  return any;
+}
+
+const SIZE_FEATURE = /^(min-|max-)?(width|height|aspect-ratio|orientation|device-width|device-height)$/;
+
+function evaluateMediaQuery(query: string, viewport: Viewport): boolean | null {
+  let q = query.toLowerCase().replace(/\s+/g, " ").trim();
+  let negate = false;
+  if (q.startsWith("not ")) {
+    negate = true;
+    q = q.slice(4);
+  }
+  q = q.replace(/^only /, "");
+
+  const parts = q.split(/ and /).map((p) => p.trim());
+  let result = true;
+  let sawSize = false;
+  for (const part of parts) {
+    if (part === "all" || part === "screen") continue;
+    if (part === "print" || part === "speech") {
+      result = false;
+      continue;
+    }
+    const inner = /^\((.*)\)$/.exec(part)?.[1];
+    if (inner === undefined) return null;
+    const verdict = evaluateSizeFeature(inner.trim(), viewport);
+    if (verdict === null) return null;
+    sawSize = true;
+    result = result && verdict;
+  }
+  if (!sawSize && result) return null; // `screen` alone: nothing to decide.
+  return negate ? !result : result;
+}
+
+function evaluateSizeFeature(feature: string, viewport: Viewport): boolean | null {
+  const value = (name: string): number | null => {
+    const base = name.replace(/^device-/, "");
+    if (base === "width") return viewport.width;
+    if (base === "height") return viewport.height;
+    if (base === "aspect-ratio") return viewport.width / viewport.height;
+    return null;
+  };
+  const length = (raw: string): number | null => {
+    const r = raw.trim();
+    const ratio = /^(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/.exec(r);
+    if (ratio) return parseFloat(ratio[1]) / parseFloat(ratio[2]);
+    const m = /^(-?\d*\.?\d+)(px|em|rem)?$/.exec(r);
+    if (!m) return null;
+    return parseFloat(m[1]) * (m[2] === "em" || m[2] === "rem" ? 16 : 1);
+  };
+
+  // Level 3: (min-width: 800px), (orientation: landscape)
+  const colon = /^([a-z-]+)\s*:\s*(.+)$/.exec(feature);
+  if (colon) {
+    const [, name, raw] = colon;
+    if (!SIZE_FEATURE.test(name)) return null;
+    if (name === "orientation") return (viewport.width >= viewport.height ? "landscape" : "portrait") === raw.trim();
+    const prefix = /^(min|max)-/.exec(name)?.[1];
+    const actual = value(name.replace(/^(min|max)-/, ""));
+    const target = length(raw);
+    if (actual === null || target === null) return null;
+    return prefix === "min" ? actual >= target : prefix === "max" ? actual <= target : actual === target;
+  }
+
+  // Level 4 ranges: (width >= 800px), (400px < width <= 800px)
+  const ops = feature.split(/\s*(<=|>=|<|>|=)\s*/);
+  if (ops.length === 3 || ops.length === 5) {
+    const compare = (a: number, op: string, b: number) =>
+      op === "<" ? a < b : op === "<=" ? a <= b : op === ">" ? a > b : op === ">=" ? a >= b : a === b;
+    const resolve = (token: string): number | null =>
+      SIZE_FEATURE.test(token) ? value(token) : length(token);
+    const names = ops.filter((_, i) => i % 2 === 0);
+    if (!names.some((t) => /^(width|height|aspect-ratio|device-width|device-height)$/.test(t))) return null;
+    for (let i = 0; i + 2 < ops.length; i += 2) {
+      const a = resolve(ops[i]);
+      const b = resolve(ops[i + 2]);
+      if (a === null || b === null) return null;
+      if (!compare(a, ops[i + 1], b)) return false;
+    }
+    return true;
+  }
+  return null;
+}
+
+/**
+ * What a document's script sees when it asks how big the window is.
+ *
+ * A Claude Design script that picks a layout from `innerWidth` or
+ * `matchMedia("(max-width: …)")` would otherwise pick the plugin window's.
+ * Queries about anything but size go to the real matchMedia.
+ */
+function reportDesignViewport(viewport: Viewport): () => void {
+  const originalMatchMedia = window.matchMedia.bind(window);
+  const widthDescriptor = Object.getOwnPropertyDescriptor(window, "innerWidth");
+  const heightDescriptor = Object.getOwnPropertyDescriptor(window, "innerHeight");
+  try {
+    Object.defineProperty(window, "innerWidth", { configurable: true, get: () => viewport.width });
+    Object.defineProperty(window, "innerHeight", { configurable: true, get: () => viewport.height });
+  } catch {
+    // Not redefinable here; scripts see the real window.
+  }
+  window.matchMedia = ((query: string) => {
+    const verdict = evaluateMediaList(query, viewport);
+    if (verdict === null) return originalMatchMedia(query);
+    const real = originalMatchMedia(query);
+    return Object.assign(Object.create(Object.getPrototypeOf(real)), {
+      matches: verdict,
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }) as MediaQueryList;
+  }) as typeof window.matchMedia;
+
+  return () => {
+    window.matchMedia = originalMatchMedia;
+    try {
+      if (widthDescriptor) Object.defineProperty(window, "innerWidth", widthDescriptor);
+      else delete (window as { innerWidth?: number }).innerWidth;
+      if (heightDescriptor) Object.defineProperty(window, "innerHeight", heightDescriptor);
+      else delete (window as { innerHeight?: number }).innerHeight;
+    } catch {
+      // Left as the design size; harmless once the stage is gone.
+    }
+  };
 }
 
 type HostSnapshot = Array<{ el: Element; attrs: Map<string, string> }>;
@@ -1234,18 +1741,43 @@ async function walkElement(
   const style = getComputedStyle(el);
   if (style.display === "none" || style.visibility === "hidden") return null;
 
+  // A rotated box measures as its rotated bounding box, which is bigger than
+  // the box and has no angle. Measure it with the transform off, so the layer
+  // and everything inside it are laid out upright, and carry the angle instead.
+  const turn = rotationOf(style);
+  const rotatedRect = turn !== 0 ? el.getBoundingClientRect() : null;
+  const restoreTransform = turn !== 0 ? suspendTransform(el) : null;
+  try {
+    return await walkMeasured(el, parent, ctx, style, turn, rotatedRect);
+  } finally {
+    restoreTransform?.();
+  }
+}
+
+async function walkMeasured(
+  el: HTMLElement,
+  parent: HTMLElement,
+  ctx: Ctx,
+  style: CSSStyleDeclaration,
+  turn: number,
+  rotatedRect: DOMRect | null,
+): Promise<IRNode | null> {
   const rect = el.getBoundingClientRect();
   const parentRect = parent.getBoundingClientRect();
   const hasChildren = el.children.length > 0;
   if (rect.width <= 0 && rect.height <= 0 && !hasChildren) return null;
 
+  // Upright size, placed so its centre is where the rotated box's centre was.
+  const centre = rotatedRect
+    ? { x: rotatedRect.left + rotatedRect.width / 2, y: rotatedRect.top + rotatedRect.height / 2 }
+    : null;
   const base: BoxBase = {
-    x: round(rect.left - parentRect.left),
-    y: round(rect.top - parentRect.top),
+    x: round(centre ? centre.x - rect.width / 2 - parentRect.left : rect.left - parentRect.left),
+    y: round(centre ? centre.y - rect.height / 2 - parentRect.top : rect.top - parentRect.top),
     width: round(rect.width),
     height: round(rect.height),
     opacity: clampOpacity(style.opacity),
-    rotation: 0,
+    rotation: turn,
     clips: clipsContent(style),
   };
 
@@ -1254,8 +1786,33 @@ async function walkElement(
   const control = formControlNode(el, style, base, ctx);
   if (control) return control;
 
+  // A chart drawn on a <canvas> is pixels, not DOM: without this it imported
+  // as an empty frame. A tainted canvas (cross-origin image drawn in) refuses.
+  if (el.tagName === "CANVAS" || el.tagName === "VIDEO") {
+    const bytes = await snapshotMedia(el as HTMLCanvasElement | HTMLVideoElement, ctx);
+    if (bytes) {
+      return {
+        kind: "IMAGE",
+        name: el.getAttribute("aria-label") || (el.tagName === "CANVAS" ? "Canvas" : "Video"),
+        ...base,
+        fills: [],
+        cornerRadius: cornerRadii(style),
+        effects: effects(style, ctx),
+        imageBytes: bytes,
+        children: [],
+      };
+    }
+    ctx.warnings.push(
+      el.tagName === "CANVAS"
+        ? "A <canvas> could not be read, so it imported as an empty box."
+        : "A video had no poster or loaded frame, so it imported as an empty box.",
+    );
+  }
+
   if (el.tagName === "IMG") {
-    const bytes = await loadImage((el as HTMLImageElement).currentSrc || (el as HTMLImageElement).src, ctx);
+    const imgSrc = (el as HTMLImageElement).currentSrc || (el as HTMLImageElement).src;
+    const bytes =
+      (await loadImage(imgSrc, ctx)) ?? (await rasteriseSvg(imgSrc, rect.width, rect.height));
     if (!bytes) {
       ctx.warnings.push(`Could not read image: ${(el as HTMLImageElement).alt || (el as HTMLImageElement).src}`);
       return null;
@@ -1280,7 +1837,7 @@ async function walkElement(
       fills: [],
       cornerRadius: { tl: 0, tr: 0, br: 0, bl: 0 },
       effects: effects(style, ctx),
-      svg: el.outerHTML,
+      svg: serializeSvg(el as unknown as SVGSVGElement),
       children: [],
     };
   }
@@ -1288,7 +1845,18 @@ async function walkElement(
   if (isTextContainer(el)) {
     const text = extractText(el, style, ctx);
     if (text && text.characters.trim().length > 0) {
-      const fills = backgroundPaints(el, style, ctx);
+      const maxLines = truncationOf(style);
+      if (maxLines) text.maxLines = maxLines;
+      // `background-clip: text` clips every background to the glyphs. Painted
+      // as a fill it came in as a gradient block with invisible text on top.
+      const clipsToText = /text/.test(
+        style.backgroundClip || style.getPropertyValue("-webkit-background-clip"),
+      );
+      if (clipsToText) {
+        const glyphFill = parseLinearGradient(style.backgroundImage);
+        if (glyphFill) text.glyphFill = glyphFill;
+      }
+      const fills = clipsToText ? [] : backgroundPaints(el, style, ctx);
       const border = borders(el, style, ctx);
       const shadows = effects(style, ctx);
       const padding = {
@@ -1419,19 +1987,27 @@ async function walkElement(
   // warning and then dropped. Anonymous inline boxes have no element to
   // measure, so a Range stands in for one.
   const children: IRNode[] = [];
+  const sources: Array<Element | null> = [];
   for (const child of Array.from(el.childNodes)) {
     if (child.nodeType === Node.TEXT_NODE) {
       const fragment = looseTextNode(child as Text, el, rect, ctx);
-      if (fragment) children.push(fragment);
+      if (fragment) {
+        children.push(fragment);
+        sources.push(null);
+      }
       continue;
     }
     if (child.nodeType !== Node.ELEMENT_NODE) continue;
     const node = await walk(child as HTMLElement, el, ctx);
-    if (node) children.push(node);
+    if (node) {
+      children.push(node);
+      sources.push(child as Element);
+    }
   }
 
   const layout = deriveLayout(el, style, children, ctx);
   applyChildSizing(children, el, layout);
+  if (!layout) orderByStacking(children, sources);
 
   return {
     kind: "FRAME",
