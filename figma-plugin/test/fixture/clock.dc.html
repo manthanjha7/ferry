@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Script-driven motion fixture</title>
+  </head>
+  <body>
+    <x-dc>
+      <!-- Four shapes of motion a Claude Design script writes by hand. Each
+           imported at its first tick before the virtual clock: "0", nothing
+           typed, and a live edit that never happened. -->
+      <div data-name="Count" style="background: #eeeeee">{{ count }}</div>
+      <div data-name="Typed" style="background: #eeeeee">{{ typed }}</div>
+      <div data-name="Slide" style="background: #eeeeee">{{ slide }}</div>
+      <div data-name="Live" id="clock-live" style="background: #eeeeee">waiting</div>
+    </x-dc>
+    <script type="text/x-dc" data-dc-script>
+      class Component extends DCLogic {
+        state = { count: 0, typed: "", slide: 1 };
+        componentDidMount() {
+          // Counts up over 1.5s by elapsed time, one frame at a time.
+          const start = performance.now();
+          const step = () => {
+            const p = Math.min(1, (performance.now() - start) / 1500);
+            this.setState({ count: Math.round(1234 * p) });
+            if (p < 1) requestAnimationFrame(step);
+          };
+          requestAnimationFrame(step);
+          // Types a line one letter every 60ms.
+          const text = "Hello, world";
+          let i = 0;
+          const typer = setInterval(() => {
+            i++;
+            this.setState({ typed: text.slice(0, i) });
+            if (i >= text.length) clearInterval(typer);
+          }, 60);
+          // A slideshow every 3s: must stay on its first slide.
+          setInterval(() => this.setState({ slide: this.state.slide + 1 }), 3000);
+          // Draws into the live page once it is mounted.
+          setTimeout(() => {
+            const el = document.getElementById("clock-live");
+            if (el) el.textContent = "drawn after mount";
+          }, 2500);
+        }
+        renderVals() {
+          return { count: String(this.state.count), typed: this.state.typed, slide: String(this.state.slide) };
+        }
+      }
+    </script>
+  </body>
+</html>

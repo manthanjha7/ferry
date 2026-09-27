@@ -1118,6 +1118,37 @@
           JSON.stringify(byText(stress.root, "Font stack")?.text?.runs?.[0]?.fontStack),
         );
 
+        // --- Script-driven motion (test/fixture/clock.dc.html) ------------------
+        // A document's own timers and frames run on a virtual clock while it is
+        // measured, so hand-written animation reaches its end instead of being
+        // caught on its first tick.
+        const clockDoc = await window.extractDocument(
+          await (await fetch("clock.dc.html")).text(),
+          "Clock",
+          { viewportWidth: 400 },
+        );
+        const textIn = (name) => {
+          const n = findByName(clockDoc.root, name);
+          const t = n && (n.kind === "TEXT" ? n : (n.children || []).find((c) => c.kind === "TEXT"));
+          return t?.text?.characters;
+        };
+        check(
+          "a counter animated by frames and elapsed time imports at its final value",
+          textIn("Count") === "1234",
+          `count=${textIn("Count")}`,
+        );
+        check("a typewriter on an interval imports fully typed", textIn("Typed") === "Hello, world", `typed=${textIn("Typed")}`);
+        check("a slow slideshow interval is not fast-forwarded off its first slide", textIn("Slide") === "1", `slide=${textIn("Slide")}`);
+        check(
+          "a timer that edits the live page after mount runs before measuring",
+          textIn("Live") === "drawn after mount",
+          `live=${textIn("Live")}`,
+        );
+        check(
+          "the document's timers stop with the import: the browser's own timer functions are back",
+          /native code/.test(String(window.setTimeout)) && /native code/.test(String(Date.now)),
+        );
+
         // --- Two screens of one export that disagree (divergent-a/b.html) ------
         // The premise the sandbox half of this story rests on, measured rather
         // than assumed: two Claude Design documents can declare one token name

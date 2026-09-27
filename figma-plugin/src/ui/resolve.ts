@@ -49,6 +49,8 @@
  * of resolution.
  */
 
+import { real } from "./clock";
+
 /**
  * Renames `<sc-for>`/`<sc-if>` to `<template data-sc-for>`/`<template
  * data-sc-if>` in the RAW markup, before any HTML parsing happens.
@@ -509,7 +511,7 @@ function createDCLogicStub(
         Object.assign(this.state, partial as Record<string, unknown>);
       }
       report.setStateCalls++;
-      tracker.lastActivityAt = Date.now();
+      tracker.lastActivityAt = real.now();
     }
   };
 }
@@ -556,7 +558,7 @@ const BOOT_FIRST_ACTIVITY_MS = 1200;
 const BOOT_POLL_INTERVAL_MS = 50;
 
 function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolve) => real.setTimeout(resolve, ms));
 }
 
 /**
@@ -587,14 +589,14 @@ function sleep(ms: number): Promise<void> {
  * hard cap is for: bounding the "no signal, ever" case, not just a slow one.
  */
 async function waitForBootSettle(tracker: BootTracker): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < BOOT_HARD_CAP_MS) {
+  const start = real.now();
+  while (real.now() - start < BOOT_HARD_CAP_MS) {
     // Nothing has happened yet. Give a first `setState` a bounded window to
     // appear rather than holding the full hard cap open for one that never will.
-    if (tracker.lastActivityAt === null && Date.now() - start >= BOOT_FIRST_ACTIVITY_MS) {
+    if (tracker.lastActivityAt === null && real.now() - start >= BOOT_FIRST_ACTIVITY_MS) {
       return;
     }
-    if (tracker.lastActivityAt !== null && Date.now() - tracker.lastActivityAt >= BOOT_QUIET_MS) {
+    if (tracker.lastActivityAt !== null && real.now() - tracker.lastActivityAt >= BOOT_QUIET_MS) {
       return;
     }
     await sleep(BOOT_POLL_INTERVAL_MS);

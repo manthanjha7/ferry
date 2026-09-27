@@ -11,6 +11,7 @@
  * the difference between a file you can edit and a pile of absolute frames.
  */
 
+import { installVirtualClock, real, SETTLE_HORIZON_MS, type VirtualClock } from "./clock";
 import {
   DEFAULT_EXTRACT_OPTIONS,
   type AxisAlign,
@@ -185,6 +186,7 @@ export async function mountDocument(
   const reveal = revealEverything();
   const viewport = { width: options.viewportWidth, height: designViewportHeight(options.viewportWidth) };
   const restoreWindowSize = reportDesignViewport(viewport);
+  const clock = installVirtualClock();
   const resolveReport = await resolveDynamicDocument(parsed, {
     moduleSources: options.moduleSources,
     documentSources: options.documentSources,
@@ -239,7 +241,7 @@ export async function mountDocument(
   await waitForStylesheets(adopted);
   emulateViewport(container, adopted, viewport);
   await waitForAssets(container);
-  await settleMotion(container, adopted, reveal.flush);
+  await settleMotion(container, adopted, reveal.flush, clock);
   materializePseudoElements(container);
 
   return {
@@ -255,6 +257,7 @@ export async function mountDocument(
       restoreHost(host);
       reveal.restore();
       restoreWindowSize();
+      clock.uninstall();
     },
   };
 }
@@ -285,7 +288,7 @@ function revealEverything(): { flush: () => void; restore: () => void } {
     }
     observe(target: Element): void {
       this.pending.add(target);
-      setTimeout(() => this.deliver(), 0);
+      real.setTimeout(() => this.deliver(), 0);
     }
     unobserve(target: Element): void {
       this.pending.delete(target);
@@ -308,7 +311,7 @@ function revealEverything(): { flush: () => void; restore: () => void } {
           boundingClientRect: rect,
           intersectionRect: rect,
           rootBounds: null,
-          time: performance.now(),
+          time: real.perf(),
         } as unknown as IntersectionObserverEntry;
       });
       this.pending.clear();
@@ -350,11 +353,21 @@ async function settleMotion(
   container: HTMLElement,
   adopted: Element[],
   flushReveals: () => void,
+  clock: VirtualClock,
 ): Promise<void> {
-  const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+  const tick = () => new Promise<void>((resolve) => real.setTimeout(resolve, 0));
   await tick();
-  await tick();
+  // The page is in the DOM now, so let the document's own timers and frames
+  // run to their end: counters reach their value, typewriters finish typing.
+  // Promise continuations get a turn between passes.
+  clock.setLimit(SETTLE_HORIZON_MS);
+  for (let pass = 0; pass < 4; pass++) {
+    clock.advance(SETTLE_HORIZON_MS);
+    await tick();
+  }
   flushReveals();
+  clock.advance(SETTLE_HORIZON_MS);
+  await tick();
 
   for (const node of adopted) {
     const sheet = (node as HTMLStyleElement | HTMLLinkElement).sheet;
@@ -1088,7 +1101,7 @@ async function waitForStylesheets(nodes: Element[]): Promise<void> {
           }),
       ),
     ),
-    new Promise((resolve) => setTimeout(resolve, 5000)),
+    new Promise((resolve) => real.setTimeout(resolve, 5000)),
   ]);
 }
 
@@ -1113,21 +1126,21 @@ async function waitForAssets(scope: HTMLElement): Promise<void> {
   // nothing and an unreachable one stops being able to stall the import.
   const fonts = Promise.race([
     document.fonts?.ready ?? Promise.resolve(),
-    new Promise((resolve) => setTimeout(resolve, 1500)),
+    new Promise((resolve) => real.setTimeout(resolve, 1500)),
   ]);
 
   // Never let a hung asset block the whole import.
   await Promise.race([
     Promise.all([...pending, fonts]),
-    new Promise((resolve) => setTimeout(resolve, 6000)),
+    new Promise((resolve) => real.setTimeout(resolve, 6000)),
   ]);
 
   // One more frame so layout settles after fonts swap in — but rAF only fires
   // while the surface is actually being painted, and a plugin iframe in a
   // backgrounded window is not. Racing a timer keeps this from deadlocking.
   await Promise.race([
-    new Promise((resolve) => requestAnimationFrame(() => resolve(null))),
-    new Promise((resolve) => setTimeout(resolve, 300)),
+    new Promise((resolve) => real.requestAnimationFrame(() => resolve(null))),
+    new Promise((resolve) => real.setTimeout(resolve, 300)),
   ]);
 
   // Force a synchronous layout so measurements below are against settled boxes

@@ -8,6 +8,7 @@
  * leaves the machine.
  */
 
+import { real } from "./clock";
 import type {
   ExtractOptions,
   FlowSpec,
@@ -1675,7 +1676,7 @@ let activePrompt = EXPORT_PROMPT;
 copyPromptButton.addEventListener("click", () => {
   copyToClipboard(activePrompt);
   copyPromptButton.textContent = "Copied";
-  setTimeout(() => {
+  real.setTimeout(() => {
     copyPromptButton.textContent = "Copy prompt";
   }, 1600);
 });
