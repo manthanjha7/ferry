@@ -44,6 +44,8 @@ import {
 
 export type BuildResult = {
   root: FrameNode;
+  /** The frame holding this document's hover variant sets, if it has any. */
+  componentsArea?: FrameNode;
   nodeCount: number;
   mapping: MappingReport;
   substitutions: string[];
@@ -102,6 +104,8 @@ type BuildCtx = {
   components: Map<string, ComponentNode>;
   /** How many instances each of those actually got. */
   instanceCounts: Map<string, number>;
+  /** Where this document's variant sets live, beside it on the page. */
+  componentsArea: FrameNode | null;
 };
 
 export async function buildDocument(
@@ -129,6 +133,7 @@ export async function buildDocument(
     lastYield: Date.now(),
     components: new Map(),
     instanceCounts: new Map(),
+    componentsArea: null,
   };
 
   let root: FrameNode | null = null;
@@ -149,15 +154,21 @@ export async function buildDocument(
     // be on the canvas. Only the *position* is the batch's business.
     figma.currentPage.appendChild(root);
     if (options.place !== false) placeBesideExistingContent(root);
+    if (ctx.componentsArea) {
+      ctx.componentsArea.name = `${doc.name} · components`;
+      if (options.place !== false) placeAreas([root], [ctx.componentsArea]);
+    }
   } catch (error) {
     // A partially built tree is worse than none: it looks like a successful
     // import until the user scrolls into the missing half.
     if (root && !root.removed) root.remove();
+    if (ctx.componentsArea && !ctx.componentsArea.removed) ctx.componentsArea.remove();
     throw error;
   }
 
   return {
     root,
+    componentsArea: ctx.componentsArea ?? undefined,
     nodeCount: ctx.count,
     mapping: registry.report,
     substitutions: fonts.substitutions,
@@ -248,6 +259,7 @@ export async function buildDocuments(
   const origin = batchOrigin();
 
   const roots: FrameNode[] = [];
+  const areas: FrameNode[] = [];
   /**
    * Index-aligned with `docs`, unlike `roots`, which skips a document that
    * failed to build. A `FlowSpec` indexes into `docs`, so reading the flow off
@@ -271,6 +283,7 @@ export async function buildDocuments(
       );
 
       roots.push(result.root);
+      if (result.componentsArea) areas.push(result.componentsArea);
       rootByDoc.push(result.root);
       nodeCount += result.nodeCount;
       perDocument.push({ name: doc.name, ok: true, nodes: result.nodeCount });
@@ -310,6 +323,7 @@ export async function buildDocuments(
   // the origin a second time.
   layoutBatch(roots, section ? { x: 0, y: 0 } : origin, placement);
   if (section) fitSection(section, roots, origin, placement);
+  placeAreas(section ? [section as unknown as FrameNode] : roots, areas);
 
   const wiring = options.flow
     ? await wireFlow(rootByDoc, options.flow, options.trigger ?? DEFAULT_FLOW_TRIGGER, warnings)
@@ -755,6 +769,7 @@ export function layoutBatch(
 function countNodes(node: IRNode): number {
   let total = 1;
   for (const child of node.children) total += countNodes(child);
+  if (node.hover) total += countNodes(node.hover);
   return total;
 }
 
@@ -796,6 +811,7 @@ function collectFontRequests(
     }
   }
   for (const child of node.children) collectFontRequests(child, out);
+  if (node.hover) collectFontRequests(node.hover, out);
   return out;
 }
 
@@ -968,7 +984,8 @@ async function buildFrame(node: IRNode, ctx: BuildCtx): Promise<FrameNode> {
   for (const child of node.children) {
     let childNode = await buildNode(child, ctx);
     if (!childNode) continue;
-    if (child.component) childNode = asComponent(childNode, child, ctx);
+    if (child.hover && (!child.component || child.component.main)) childNode = await asHoverSet(childNode, child, ctx);
+    else if (child.component) childNode = asComponent(childNode, child, ctx);
     frame.appendChild(childNode);
     built.push(childNode);
     builtIr.push(child);
@@ -1091,6 +1108,115 @@ function asComponent(built: SceneNode, ir: IRNode, ctx: BuildCtx): SceneNode {
   } catch (error) {
     ctx.warnings.push(`Kept "${ir.name}" as a plain layer: ${(error as Error).message}`);
     return built;
+  }
+}
+
+/**
+ * A layer with a hover state, as a component set: State=Default and
+ * State=Hover, side by side in the document's components area, the default
+ * wired to change to the hover variant while hovering (Smart Animate). The
+ * design gets an instance of the default where the layer was, so hovering it
+ * in a prototype plays the hover.
+ *
+ * A layer that is also one of a repeated set is that set's main: its copies
+ * become instances of the default variant and hover the same way.
+ */
+async function asHoverSet(built: SceneNode, ir: IRNode, ctx: BuildCtx): Promise<SceneNode> {
+  const hoverBuilt = await buildNode(ir.hover!, ctx);
+  if (!hoverBuilt) return built;
+  try {
+    const area = componentsArea(ctx);
+    const layerName = built.name;
+    const standard = asComponentNode(built);
+    const hovered = asComponentNode(hoverBuilt);
+    area.appendChild(standard);
+    area.appendChild(hovered);
+    standard.name = "State=Default";
+    hovered.name = "State=Hover";
+    const set = figma.combineAsVariants([standard, hovered], area);
+    set.name = ir.component?.name ?? (ir.name || "Hover");
+    set.layoutMode = "HORIZONTAL";
+    set.primaryAxisSizingMode = "AUTO";
+    set.counterAxisSizingMode = "AUTO";
+    set.itemSpacing = 24;
+    set.paddingTop = set.paddingRight = set.paddingBottom = set.paddingLeft = 24;
+    await standard.setReactionsAsync([
+      {
+        trigger: { type: "ON_HOVER" },
+        actions: [
+          {
+            type: "NODE",
+            destinationId: hovered.id,
+            navigation: "CHANGE_TO",
+            transition: { type: "SMART_ANIMATE", easing: { type: "EASE_OUT" }, duration: 0.2 },
+          },
+        ],
+      },
+    ]);
+    const instance = standard.createInstance();
+    instance.name = layerName;
+    if (ir.component) {
+      ctx.components.set(ir.component.key, standard);
+      ctx.instanceCounts.set(ir.component.key, (ctx.instanceCounts.get(ir.component.key) ?? 0) + 1);
+    }
+    return instance;
+  } catch (error) {
+    ctx.warnings.push(`Imported "${ir.name}" without its hover state: ${(error as Error).message}`);
+    if (!hoverBuilt.removed) hoverBuilt.remove();
+    return built;
+  }
+}
+
+/** The page-level frame this document's variant sets go in, made on first use. */
+function componentsArea(ctx: BuildCtx): FrameNode {
+  if (ctx.componentsArea && !ctx.componentsArea.removed) return ctx.componentsArea;
+  const area = figma.createFrame();
+  area.name = "Components";
+  area.setPluginData("ferry.role", "components");
+  area.fills = [];
+  area.clipsContent = false;
+  area.layoutMode = "VERTICAL";
+  area.primaryAxisSizingMode = "AUTO";
+  area.counterAxisSizingMode = "AUTO";
+  area.itemSpacing = 40;
+  area.paddingTop = area.paddingRight = area.paddingBottom = area.paddingLeft = 40;
+  figma.currentPage.appendChild(area);
+  ctx.componentsArea = area;
+  return area;
+}
+
+/**
+ * A layer as a component. A frame becomes one where it stands; anything else
+ * (a text link, an icon) is wrapped in a frame that hugs it first, as Figma's
+ * own Create component does.
+ */
+function asComponentNode(node: SceneNode): ComponentNode {
+  if (node.type === "FRAME") return figma.createComponentFromNode(node);
+  const wrap = figma.createFrame();
+  wrap.name = node.name;
+  wrap.fills = [];
+  wrap.clipsContent = false;
+  wrap.layoutMode = "HORIZONTAL";
+  wrap.primaryAxisSizingMode = "AUTO";
+  wrap.counterAxisSizingMode = "AUTO";
+  wrap.appendChild(node);
+  return figma.createComponentFromNode(wrap);
+}
+
+/** Components areas to the right of what was imported, one under another. */
+function placeAreas(beside: SceneNode[], areas: FrameNode[]): void {
+  if (areas.length === 0 || beside.length === 0) return;
+  let right = -Infinity;
+  let top = Infinity;
+  for (const node of beside) {
+    right = Math.max(right, node.x + node.width);
+    top = Math.min(top, node.y);
+  }
+  let y = top;
+  for (const area of areas) {
+    area.x = right + 200;
+    area.y = y;
+    y += area.height + 120;
   }
 }
 

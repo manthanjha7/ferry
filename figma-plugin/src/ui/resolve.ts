@@ -559,7 +559,7 @@ const BOOT_FIRST_ACTIVITY_MS = 1200;
 const BOOT_POLL_INTERVAL_MS = 50;
 
 function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => real.setTimeout(resolve, ms));
+  return real.after(ms);
 }
 
 /**

@@ -213,6 +213,11 @@ export type IRNode = {
    * the rest become its instances, carrying their own text and images.
    */
   component?: { key: string; name: string; main: boolean };
+  /**
+   * The same layer measured with the pointer on it (src/ui/hover.ts), when
+   * that looks different. It becomes the component's Hover variant.
+   */
+  hover?: IRNode;
 
   fills: IRPaint[];
   border?: IRBorder;
@@ -560,6 +565,8 @@ export type ExtractOptions = {
   inferStacks: boolean;
   /** Make repeated elements a main component and instances (src/ui/components.ts). */
   components?: boolean;
+  /** Measure hover states as Hover variants (src/ui/hover.ts). */
+  hoverStates?: boolean;
   /** Rasterise elements we cannot faithfully convert instead of dropping them. */
   rasterizeUnsupported: boolean;
   /**

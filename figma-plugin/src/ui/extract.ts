@@ -14,6 +14,7 @@
 import { bootAnimation, readAnimationSpec, settledMoment, type LiveAnimation } from "./animation";
 import { installVirtualClock, real, SETTLE_HORIZON_MS, type VirtualClock } from "./clock";
 import { markComponents } from "./components";
+import { prepareHover, type HoverPass } from "./hover";
 
 /** The page, with its repeated elements marked as components. */
 function withComponents(root: IRNode): IRNode {
@@ -110,6 +111,10 @@ type Ctx = {
    * walk. Each run keeps a fallback until the batch overwrites it.
    */
   pendingLineHeights: PendingLineHeight[];
+  /** Elements with a hover state, and the means to put one in it (src/ui/hover.ts). */
+  hover?: HoverPass | null;
+  /** Measuring a hover state: nothing inside gets a hover state of its own. */
+  inHover?: boolean;
 };
 
 /** A run awaiting its `line-height: normal` measurement, with its face. */
@@ -340,7 +345,7 @@ function revealEverything(): { flush: () => void; restore: () => void } {
     }
     observe(target: Element): void {
       this.pending.add(target);
-      real.setTimeout(() => this.deliver(), 0);
+      void real.task().then(() => this.deliver());
     }
     unobserve(target: Element): void {
       this.pending.delete(target);
@@ -407,7 +412,7 @@ async function settleMotion(
   flushReveals: () => void,
   clock: VirtualClock,
 ): Promise<void> {
-  const tick = () => new Promise<void>((resolve) => real.setTimeout(resolve, 0));
+  const tick = () => real.task();
   await tick();
   // The page is in the DOM now, so let the document's own timers and frames
   // run to their end: counters reach their value, typewriters finish typing.
@@ -1343,7 +1348,7 @@ async function waitForStylesheets(nodes: Element[]): Promise<void> {
           }),
       ),
     ),
-    new Promise((resolve) => real.setTimeout(resolve, 5000)),
+    real.after(5000),
   ]);
 }
 
@@ -1432,13 +1437,13 @@ async function waitForAssets(scope: HTMLElement): Promise<void> {
   // for Google Fonts, so they do arrive, within the budget).
   const fonts = Promise.race([
     loadUsedFaces(scope).then(() => document.fonts?.ready),
-    new Promise((resolve) => real.setTimeout(resolve, 4000)),
+    real.after(4000),
   ]);
 
   // Never let a hung asset block the whole import.
   await Promise.race([
     Promise.all([...pending, fonts]),
-    new Promise((resolve) => real.setTimeout(resolve, 6000)),
+    real.after(6000),
   ]);
 
   // One more frame so layout settles after fonts swap in — but rAF only fires
@@ -1446,7 +1451,7 @@ async function waitForAssets(scope: HTMLElement): Promise<void> {
   // backgrounded window is not. Racing a timer keeps this from deadlocking.
   await Promise.race([
     new Promise((resolve) => real.requestAnimationFrame(() => resolve(null))),
-    new Promise((resolve) => real.setTimeout(resolve, 300)),
+    real.after(300),
   ]);
 
   // Force a synchronous layout so measurements below are against settled boxes
@@ -1527,6 +1532,22 @@ async function measureMounted(
     };
 
     await prefetchBackgroundImages(handle.root, ctx);
+    if (opts.hoverStates !== false && !handle.animation) {
+      ctx.hover = prepareHover(handle.root, ownedStylesheets(handle));
+      // Removed with the document's own sheets if anything below throws.
+      handle.adopted.push(ctx.hover.sheet);
+      // The outermost hovered element owns the state: a card's hover takes
+      // its link with it, rather than a variant set inside a variant.
+      for (const el of Array.from(ctx.hover.targets)) {
+        for (let p = el.parentElement; p; p = p.parentElement) {
+          if (ctx.hover.targets.has(p)) {
+            ctx.hover.targets.delete(el);
+            break;
+          }
+        }
+      }
+      debug(`hover states: ${ctx.hover.targets.size}`);
+    }
 
     const children: IRNode[] = [];
     const deckSlides = detectDeckSlides(handle.root);
@@ -2094,6 +2115,32 @@ function themeScopeOf(el: HTMLElement, ctx: Ctx): string | undefined {
  * hundreds of redundant mode assignments saying the same thing.
  */
 async function walk(
+  el: HTMLElement,
+  parent: HTMLElement,
+  ctx: Ctx,
+): Promise<IRNode | null> {
+  const node = await walkScoped(el, parent, ctx);
+  if (!node || !ctx.hover || ctx.inHover || !ctx.hover.targets.has(el)) return node;
+  // The same element again, pointer on it: the Hover variant.
+  ctx.inHover = true;
+  ctx.hover.enter(el);
+  try {
+    const hovered = await walkScoped(el, parent, ctx);
+    if (hovered && JSON.stringify(stripForCompare(hovered)) !== JSON.stringify(stripForCompare(node))) node.hover = hovered;
+  } finally {
+    ctx.hover.leave(el);
+    ctx.inHover = false;
+  }
+  return node;
+}
+
+/** A node without what always differs between two measurements of it. */
+function stripForCompare(node: IRNode): unknown {
+  const { hover: _hover, component: _component, imageBytes: _bytes, ...rest } = node;
+  return { ...rest, children: node.children.map(stripForCompare) };
+}
+
+async function walkScoped(
   el: HTMLElement,
   parent: HTMLElement,
   ctx: Ctx,

@@ -692,6 +692,13 @@ export function createFigmaMock(options: MockOptions = {}): FigmaMock {
               `setReactionsAsync on "${this.name}": destination "${destinationId}" is not a node in this document.`,
             );
           }
+          if (action.navigation === "CHANGE_TO") {
+            // CHANGE_TO swaps an instance to another variant of its set.
+            if (destination.type !== "COMPONENT" || destination.parent?.type !== "COMPONENT_SET") {
+              throw new Error(`setReactionsAsync on "${this.name}": CHANGE_TO destination must be a variant in a component set.`);
+            }
+            continue;
+          }
           if (!isTopLevel(destination)) {
             throw new Error(
               `setReactionsAsync on "${this.name}": NAVIGATE destination must be a top-level frame, but ` +
@@ -1460,6 +1467,18 @@ export function createFigmaMock(options: MockOptions = {}): FigmaMock {
       return guard(new FrameNodeImpl());
     },
 
+    /** Variants: the components move into a new component set under `parent`. */
+    combineAsVariants(nodes: any[], parent: any): any {
+      if (!nodes.length || nodes.some((n) => n.type !== "COMPONENT")) {
+        throw new Error("combineAsVariants takes components.");
+      }
+      const set = guard(new FrameNodeImpl("Component set"));
+      (set as any).type = "COMPONENT_SET";
+      for (const n of nodes) set.appendChild(n);
+      parent.appendChild(set);
+      return set;
+    },
+
     /** Figma's own: the node becomes a component where it stands. */
     createComponentFromNode(node: any): ComponentNodeImpl {
       assertAlive(node);
@@ -1603,7 +1622,7 @@ export function createFigmaMock(options: MockOptions = {}): FigmaMock {
     }
 
     if (node.type === "INSTANCE") base.mainComponentId = node.mainComponent?.id;
-    if (node.type === "FRAME" || node.type === "COMPONENT" || node.type === "INSTANCE") {
+    if (node.type === "FRAME" || node.type === "COMPONENT" || node.type === "INSTANCE" || node.type === "COMPONENT_SET") {
       base.reactions = deepClone([...node.reactions]);
       base.clipsContent = node.clipsContent;
       base.layoutMode = node.layoutMode;

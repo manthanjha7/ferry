@@ -208,7 +208,10 @@ async function selftest(message: { type: string; scale?: number }): Promise<void
       reply({ type: "selftest-cleared" });
       return;
     }
-    const tops = figma.currentPage.children.filter((n) => n.type === "FRAME" || n.type === "SECTION") as SceneNode[];
+    // The imported screens; a document's components frame is not one.
+    const tops = figma.currentPage.children.filter(
+      (n) => (n.type === "FRAME" || n.type === "SECTION") && n.getPluginData("ferry.role") !== "components",
+    ) as SceneNode[];
     const frames: FrameNode[] = [];
     for (const top of tops) {
       if (top.type === "SECTION") frames.push(...(top.children.filter((c) => c.type === "FRAME") as FrameNode[]));
@@ -248,9 +251,11 @@ async function selftest(message: { type: string; scale?: number }): Promise<void
         return base;
       };
       const collections = await figma.variables.getLocalVariableCollectionsAsync();
+      const areas = figma.currentPage.children.filter((n) => n.getPluginData("ferry.role") === "components") as SceneNode[];
       reply({
         type: "selftest-tree",
         frames: frames.map(dump),
+        components: areas.map(dump),
         collections: collections.map((c) => ({ name: c.name, modes: c.modes.map((m) => m.name), count: c.variableIds.length })),
         reactions: frames.map((f) => ({ name: f.name, reactions: f.reactions.map((r) => ({ trigger: r.trigger?.type, timeout: (r.trigger as { timeout?: number })?.timeout, transition: r.actions?.[0] && (r.actions[0] as { transition?: { type: string } | null }).transition?.type })) })),
       });

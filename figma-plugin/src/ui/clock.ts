@@ -19,14 +19,55 @@
  * fast-forwarded, so they use `real`, captured before anything is patched.
  */
 
+const setTimeoutReal = window.setTimeout.bind(window);
+const perfReal = performance.now.bind(performance);
+
+/**
+ * A task, soon: after pending promise work, before anything later.
+ *
+ * Not `setTimeout(0)`. A hidden page (Figma behind another app, or the
+ * screen locked) gets its timers throttled to one a second and, after five
+ * minutes, one a minute; an import that yields a few hundred times took
+ * minutes. Message tasks are not throttled.
+ */
+function task(): Promise<void> {
+  return new Promise((resolve) => {
+    const channel = new MessageChannel();
+    channel.port1.onmessage = () => {
+      channel.port1.close();
+      resolve();
+    };
+    channel.port2.postMessage(0);
+  });
+}
+
+/**
+ * `ms` of real time. On a visible page, one timer; on a hidden one, message
+ * tasks until the time is up, since a throttled timer can fire a minute late.
+ */
+function after(ms: number): Promise<void> {
+  const end = perfReal() + ms;
+  return new Promise((resolve) => {
+    const step = () => {
+      const left = end - perfReal();
+      if (left <= 0) return resolve();
+      if (document.visibilityState === "hidden") void task().then(step);
+      else setTimeoutReal(step, left);
+    };
+    step();
+  });
+}
+
 export const real = {
-  setTimeout: window.setTimeout.bind(window),
+  setTimeout: setTimeoutReal,
   clearTimeout: window.clearTimeout.bind(window),
   requestAnimationFrame: window.requestAnimationFrame
     ? window.requestAnimationFrame.bind(window)
     : (cb: FrameRequestCallback) => window.setTimeout(() => cb(performance.now()), 16),
   now: Date.now.bind(Date),
-  perf: performance.now.bind(performance),
+  perf: perfReal,
+  task,
+  after,
 };
 
 /** Virtual time the boot phase may run to before the page is in the DOM. */
@@ -107,10 +148,10 @@ export function installVirtualClock(): VirtualClock {
     queue.set(id, { ...entry, id, seq: seq++ });
     if (!kicked) {
       kicked = true;
-      real.setTimeout(() => {
+      void real.task().then(() => {
         kicked = false;
         if (installed) advance(limit);
-      }, 0);
+      });
     }
     return id;
   };

@@ -28,7 +28,7 @@ const consoleLog = [];
 cdp.on((msg) => {
   if (msg.sessionId !== sessionId) return;
   if (msg.method === "Runtime.consoleAPICalled") {
-    consoleLog.push(`${msg.params.type}: ${msg.params.args.map((a) => a.value ?? a.description ?? "").join(" ")}`.slice(0, 600));
+    consoleLog.push(`${Math.round(msg.params.timestamp) % 100000} ${msg.params.type}: ${msg.params.args.map((a) => a.value ?? a.description ?? "").join(" ")}`.slice(0, 600));
   }
   if (msg.method === "Runtime.exceptionThrown") {
     const d = msg.params.exceptionDetails;
@@ -175,6 +175,8 @@ await run(`(() => {
   if (pick && !pick.disabled) { pick.click(); pick.dispatchEvent(new Event("change", { bubbles: true })); }
   return pick ? pick.value : "none-found";
 })()`);
+// The extractor's phase markers, so a slow case shows which phase is slow.
+await run(`window.__CD2F_DEBUG = true`);
 const t0 = Date.now();
 const importsBefore = await run(`window.__imports.length`);
 await run(`document.getElementById("cd2f-import").click(), true`);

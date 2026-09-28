@@ -1358,6 +1358,21 @@
             JSON.stringify(marks),
           );
         }
+        {
+          const row = L("Hover row");
+          const T = (n, t) => (function f(m) { return m.kind === "TEXT" && m.text.characters === t ? m : (m.children || []).map(f).find(Boolean) || null; })(n);
+          const cta = T(row, "Call now");
+          const card = L("Hover card");
+          const chip = (row?.children || []).find((c) => c.name === "Chip" || (c.children || []).some((k) => k.text?.characters === "Chip")) || T(row, "Chip");
+          const plainLink = T(row, "Plain link");
+          const red = cta?.hover?.text?.runs?.[0]?.fill?.color;
+          check("a :hover rule gives the layer a hover state, measured past its transition", !!red && Math.round(red.r * 255) === 255 && Math.round(red.g * 255) === 0 && Math.round(cta.text.runs[0].fill.color.r * 255) === 0, JSON.stringify({ rest: cta?.text?.runs?.[0]?.fill?.color, hover: red }));
+          const green = card?.hover && T(card.hover, "Card title")?.text?.runs?.[0]?.fill?.color;
+          check("a hover that changes a descendant belongs to the hovered element", !!green && Math.round(green.g * 255) === 128, JSON.stringify(green));
+          const blue = chip?.hover?.fills?.[0]?.color;
+          check("Claude Design's style-hover attribute is a hover state too", !!blue && Math.round(blue.b * 255) === 255 && Math.round(chip.fills[0].color.b * 255) === 240, JSON.stringify({ rest: chip?.fills?.[0]?.color, hover: blue }));
+          check("a layer with no hover styling gets no hover state", !!plainLink && !plainLink.hover, JSON.stringify(!!plainLink?.hover));
+        }
         const tight = (function f(n) { return n.kind === "TEXT" && n.text.characters.startsWith("Tight leading") ? n : (n.children || []).map(f).find(Boolean) || null; })(lc.root);
         check("a wrapped paragraph whose glyph boxes overlap the next line (tight leading) is still wrapped", tight?.text?.singleLine === false, JSON.stringify(tight && { single: tight.text.singleLine, h: tight.height }));
         check("preconnect links are not reported as missing stylesheets", lc.missingStylesheets.length === 0, JSON.stringify(lc.missingStylesheets));

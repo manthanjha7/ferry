@@ -200,7 +200,7 @@ export async function bootAnimation(
   for (let i = 0; i < 100; i++) {
     svg = host.querySelector("svg[data-om-exportable-video-with-duration-secs]");
     if (svg && svg.hasAttribute("data-om-sync-seek")) break;
-    await new Promise((resolve) => real.setTimeout(resolve, 20));
+    await real.after(20);
   }
   const surface = svg?.querySelector("foreignObject > div") as HTMLElement | null;
   if (!svg || !surface) {

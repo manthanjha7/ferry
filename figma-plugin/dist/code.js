@@ -957,7 +957,7 @@
   var NO_DIVERGENCE = /* @__PURE__ */ new Map();
   var IMPORT_GAP = 200;
   async function buildDocument(doc, target, onProgress, options = {}) {
-    var _a, _b;
+    var _a, _b, _c;
     onProgress(0, 1, "Resolving design tokens\u2026");
     const registry = (_a = options.registry) != null ? _a : await resolveVariables(doc.designSystem, target);
     onProgress(0, 1, "Loading fonts\u2026");
@@ -973,7 +973,8 @@
       onProgress,
       lastYield: Date.now(),
       components: /* @__PURE__ */ new Map(),
-      instanceCounts: /* @__PURE__ */ new Map()
+      instanceCounts: /* @__PURE__ */ new Map(),
+      componentsArea: null
     };
     let root = null;
     try {
@@ -983,12 +984,18 @@
       if (doc.props) root.setPluginData("ferry.props", JSON.stringify(doc.props));
       figma.currentPage.appendChild(root);
       if (options.place !== false) placeBesideExistingContent(root);
+      if (ctx.componentsArea) {
+        ctx.componentsArea.name = `${doc.name} \xB7 components`;
+        if (options.place !== false) placeAreas([root], [ctx.componentsArea]);
+      }
     } catch (error) {
       if (root && !root.removed) root.remove();
+      if (ctx.componentsArea && !ctx.componentsArea.removed) ctx.componentsArea.remove();
       throw error;
     }
     return {
       root,
+      componentsArea: (_c = ctx.componentsArea) != null ? _c : void 0,
       nodeCount: ctx.count,
       mapping: registry.report,
       substitutions: fonts.substitutions,
@@ -1002,6 +1009,7 @@
     const registry = await resolveVariables(merged.system, target, merged.notes);
     const origin = batchOrigin();
     const roots = [];
+    const areas = [];
     const rootByDoc = [];
     const perDocument = [];
     const substitutions = [];
@@ -1017,6 +1025,7 @@
           { registry, place: false, divergence: merged.divergence[index] }
         );
         roots.push(result.root);
+        if (result.componentsArea) areas.push(result.componentsArea);
         rootByDoc.push(result.root);
         nodeCount += result.nodeCount;
         perDocument.push({ name: doc.name, ok: true, nodes: result.nodeCount });
@@ -1039,6 +1048,7 @@
     const section = ((_a = options.flow) == null ? void 0 : _a.section) ? groupIntoSection(roots, options.flow.section, warnings) : null;
     layoutBatch(roots, section ? { x: 0, y: 0 } : origin, placement);
     if (section) fitSection(section, roots, origin, placement);
+    placeAreas(section ? [section] : roots, areas);
     const wiring = options.flow ? await wireFlow(rootByDoc, options.flow, (_b = options.trigger) != null ? _b : DEFAULT_FLOW_TRIGGER, warnings) : { reactions: 0, flows: 0 };
     return {
       roots,
@@ -1252,6 +1262,7 @@
   function countNodes(node) {
     let total = 1;
     for (const child of node.children) total += countNodes(child);
+    if (node.hover) total += countNodes(node.hover);
     return total;
   }
   async function maybeYield(ctx, label) {
@@ -1276,6 +1287,7 @@
       }
     }
     for (const child of node.children) collectFontRequests(child, out);
+    if (node.hover) collectFontRequests(node.hover, out);
     return out;
   }
   function placeBesideExistingContent(root) {
@@ -1356,7 +1368,8 @@
     for (const child of node.children) {
       let childNode = await buildNode(child, ctx);
       if (!childNode) continue;
-      if (child.component) childNode = asComponent(childNode, child, ctx);
+      if (child.hover && (!child.component || child.component.main)) childNode = await asHoverSet(childNode, child, ctx);
+      else if (child.component) childNode = asComponent(childNode, child, ctx);
       frame.appendChild(childNode);
       built.push(childNode);
       builtIr.push(child);
@@ -1448,6 +1461,95 @@
     } catch (error) {
       ctx.warnings.push(`Kept "${ir.name}" as a plain layer: ${error.message}`);
       return built;
+    }
+  }
+  async function asHoverSet(built, ir, ctx) {
+    var _a, _b, _c;
+    const hoverBuilt = await buildNode(ir.hover, ctx);
+    if (!hoverBuilt) return built;
+    try {
+      const area = componentsArea(ctx);
+      const layerName = built.name;
+      const standard = asComponentNode(built);
+      const hovered = asComponentNode(hoverBuilt);
+      area.appendChild(standard);
+      area.appendChild(hovered);
+      standard.name = "State=Default";
+      hovered.name = "State=Hover";
+      const set = figma.combineAsVariants([standard, hovered], area);
+      set.name = (_b = (_a = ir.component) == null ? void 0 : _a.name) != null ? _b : ir.name || "Hover";
+      set.layoutMode = "HORIZONTAL";
+      set.primaryAxisSizingMode = "AUTO";
+      set.counterAxisSizingMode = "AUTO";
+      set.itemSpacing = 24;
+      set.paddingTop = set.paddingRight = set.paddingBottom = set.paddingLeft = 24;
+      await standard.setReactionsAsync([
+        {
+          trigger: { type: "ON_HOVER" },
+          actions: [
+            {
+              type: "NODE",
+              destinationId: hovered.id,
+              navigation: "CHANGE_TO",
+              transition: { type: "SMART_ANIMATE", easing: { type: "EASE_OUT" }, duration: 0.2 }
+            }
+          ]
+        }
+      ]);
+      const instance = standard.createInstance();
+      instance.name = layerName;
+      if (ir.component) {
+        ctx.components.set(ir.component.key, standard);
+        ctx.instanceCounts.set(ir.component.key, ((_c = ctx.instanceCounts.get(ir.component.key)) != null ? _c : 0) + 1);
+      }
+      return instance;
+    } catch (error) {
+      ctx.warnings.push(`Imported "${ir.name}" without its hover state: ${error.message}`);
+      if (!hoverBuilt.removed) hoverBuilt.remove();
+      return built;
+    }
+  }
+  function componentsArea(ctx) {
+    if (ctx.componentsArea && !ctx.componentsArea.removed) return ctx.componentsArea;
+    const area = figma.createFrame();
+    area.name = "Components";
+    area.setPluginData("ferry.role", "components");
+    area.fills = [];
+    area.clipsContent = false;
+    area.layoutMode = "VERTICAL";
+    area.primaryAxisSizingMode = "AUTO";
+    area.counterAxisSizingMode = "AUTO";
+    area.itemSpacing = 40;
+    area.paddingTop = area.paddingRight = area.paddingBottom = area.paddingLeft = 40;
+    figma.currentPage.appendChild(area);
+    ctx.componentsArea = area;
+    return area;
+  }
+  function asComponentNode(node) {
+    if (node.type === "FRAME") return figma.createComponentFromNode(node);
+    const wrap = figma.createFrame();
+    wrap.name = node.name;
+    wrap.fills = [];
+    wrap.clipsContent = false;
+    wrap.layoutMode = "HORIZONTAL";
+    wrap.primaryAxisSizingMode = "AUTO";
+    wrap.counterAxisSizingMode = "AUTO";
+    wrap.appendChild(node);
+    return figma.createComponentFromNode(wrap);
+  }
+  function placeAreas(beside, areas) {
+    if (areas.length === 0 || beside.length === 0) return;
+    let right = -Infinity;
+    let top = Infinity;
+    for (const node of beside) {
+      right = Math.max(right, node.x + node.width);
+      top = Math.min(top, node.y);
+    }
+    let y = top;
+    for (const area of areas) {
+      area.x = right + 200;
+      area.y = y;
+      y += area.height + 120;
     }
   }
   function unmakeLoneComponents(ctx) {

@@ -4504,6 +4504,42 @@ async function scenarioY(ready: boolean): Promise<void> {
     JSON.stringify(kids2.map((k: any) => [k.type, k.name, k.x])));
 }
 
+async function scenarioZ(ready: boolean): Promise<void> {
+  const p = "Z (hover variants):";
+  const names = [
+    `${p} a layer with a hover state becomes a component set, State=Default and State=Hover`,
+    `${p} the design holds an instance of the default variant where the layer was`,
+    `${p} the default changes to the hover variant while hovering, with Smart Animate`,
+    `${p} the variant set sits in a components frame beside the import`,
+  ];
+  if (!ready) {
+    for (const n of names) skip(n, "captured/fixture-screen.json not found");
+    return;
+  }
+  const mock = freshMock();
+  const doc = selectFieldDoc();
+  const run = { ...doc.root.children[0].children[0].text!.runs[0] };
+  const plain = { opacity: 1, rotation: 0, clips: false, cornerRadius: { tl: 0, tr: 0, br: 0, bl: 0 }, effects: [], fills: [] };
+  const link = (color: { r: number; g: number; b: number; a: number }): IRNode => ({
+    ...plain, kind: "TEXT", name: "Email", x: 40, y: 20, width: 60, height: 20,
+    text: { characters: "Email", runs: [{ ...run, end: 5, fill: { type: "SOLID", color } }], align: "LEFT", verticalAlign: "TOP", singleLine: true },
+    children: [],
+  } as IRNode);
+  const resting = link({ r: 0.2, g: 0.2, b: 0.2, a: 1 });
+  resting.hover = link({ r: 0.9, g: 0.1, b: 0.1, a: 1 });
+  doc.root.children = [resting];
+  const result = await buildDocument(doc, { kind: "none" }, () => {});
+  const tree = mock.serializeTree(result.root);
+  const inst = tree.children[0];
+  const area = result.componentsArea ? mock.serializeTree(result.componentsArea) : null;
+  const set = area?.children?.[0];
+  check(names[0], set?.type === "COMPONENT_SET" && set.children.map((c: any) => c.name).join(",") === "State=Default,State=Hover", JSON.stringify(set && [set.type, set.children.map((c: any) => [c.type, c.name])]));
+  check(names[1], inst?.type === "INSTANCE" && inst.mainComponentId === set?.children?.[0]?.id && inst.name === "Email", JSON.stringify(inst && [inst.type, inst.mainComponentId, inst.name]));
+  const reaction = set?.children?.[0]?.reactions?.[0];
+  check(names[2], reaction?.trigger?.type === "ON_HOVER" && reaction.actions?.[0]?.navigation === "CHANGE_TO" && reaction.actions[0].destinationId === set.children[1].id && reaction.actions[0].transition?.type === "SMART_ANIMATE", JSON.stringify(reaction));
+  check(names[3], !!area && result.componentsArea!.parent?.type === "PAGE" && result.componentsArea!.x >= result.root.x + result.root.width, JSON.stringify(area && [area.name, result.componentsArea!.x, result.root.x + result.root.width]));
+}
+
 async function scenarioW(ready: boolean): Promise<void> {
   const p = "W (animation scenes play themselves):";
   const names = [
@@ -4957,6 +4993,11 @@ async function main(): Promise<void> {
     await scenarioY(fixtureReady);
   } catch (err) {
     failScenario("Y", err);
+  }
+  try {
+    await scenarioZ(fixtureReady);
+  } catch (err) {
+    failScenario("Z", err);
   }
 
   if (scenarioAOut) {
