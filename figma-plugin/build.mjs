@@ -71,6 +71,12 @@ const uiCtx = await esbuild.context({
   outfile: resolve(root, "dist/ui.js"),
   write: false,
   plugins: [inlineUiPlugin],
+  // React ships a development build unless told otherwise, at four times the
+  // size. Minified because the panel is one inlined HTML file; names kept so
+  // a stack trace in a bug report still says where it came from.
+  define: { "process.env.NODE_ENV": '"production"' },
+  minify: true,
+  keepNames: true,
 });
 
 if (watch) {

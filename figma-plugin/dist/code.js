@@ -99,9 +99,23 @@
       cache.set(key, fallback);
       return fallback;
     };
+    const resolveStack = (family, weight, italic) => {
+      var _a2;
+      if (!family.includes(",")) return resolve(family, weight, italic);
+      const parts = family.split(",").map((part) => part.trim().replace(/^['"]|['"]$/g, "")).filter(Boolean);
+      for (const part of parts) {
+        const lower = part.toLowerCase();
+        if (families.has(lower) || FAMILY_FALLBACKS[lower]) {
+          const font = resolve(part, weight, italic);
+          if (part !== parts[0]) substitutions.add(`${parts[0]} \u2192 ${font.family}`);
+          return font;
+        }
+      }
+      return resolve((_a2 = parts[0]) != null ? _a2 : "Inter", weight, italic);
+    };
     const needed = /* @__PURE__ */ new Map();
     for (const request of requests) {
-      const font = resolve(request.family, request.weight, request.italic);
+      const font = resolveStack(request.family, request.weight, request.italic);
       needed.set(`${font.family}|${font.style}`, font);
     }
     const failed = /* @__PURE__ */ new Set();
@@ -120,7 +134,7 @@
     } catch (e) {
     }
     const safeResolve = (family, weight, italic) => {
-      const font = resolve(family, weight, italic);
+      const font = resolveStack(family, weight, italic);
       return failed.has(`${font.family}|${font.style}`) ? { family: "Inter", style: "Regular" } : font;
     };
     return { resolve: safeResolve, substitutions: Array.from(substitutions) };
@@ -1060,7 +1074,7 @@
       if (!from || !to || from === to) continue;
       const list = (_a = bySource.get(from)) != null ? _a : [];
       list.push({
-        trigger,
+        trigger: edge.delay !== void 0 ? { type: "AFTER_TIMEOUT", timeout: Math.max(0.01, edge.delay) } : trigger,
         // `actions` (plural). The singular `action` field is deprecated in
         // @figma/plugin-typings 1.131.0.
         actions: [
@@ -1068,7 +1082,7 @@
             type: "NODE",
             destinationId: to.id,
             navigation: "NAVIGATE",
-            transition: null,
+            transition: edge.smart ? { type: "SMART_ANIMATE", easing: { type: "EASE_IN_AND_OUT" }, duration: 0.4 } : null,
             resetScrollPosition: false
           }
         ]
@@ -1220,10 +1234,11 @@
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
   function collectFontRequests(node, out = []) {
+    var _a;
     if (node.text) {
       for (const run of node.text.runs) {
         out.push({
-          family: run.fontFamily,
+          family: ((_a = run.fontStack) == null ? void 0 : _a.length) ? run.fontStack.join(",") : run.fontFamily,
           weight: run.fontWeight,
           italic: run.italic
         });
@@ -1349,7 +1364,23 @@
         built[i].y = builtIr[i].y;
       }
     }
+    for (let i = 0; i < built.length; i++) {
+      if (builtIr[i].rotation) rotateInPlace(built[i], builtIr[i], !node.layout || !!builtIr[i].absolute);
+    }
     return frame;
+  }
+  function rotateInPlace(node, ir, positioned) {
+    const turnable = node;
+    try {
+      turnable.rotation = -ir.rotation;
+      if (!positioned) return;
+      const a = ir.rotation * Math.PI / 180;
+      const cx = ir.x + ir.width / 2;
+      const cy = ir.y + ir.height / 2;
+      node.x = cx - ir.width / 2 * Math.cos(a) + ir.height / 2 * Math.sin(a);
+      node.y = cy - ir.width / 2 * Math.sin(a) - ir.height / 2 * Math.cos(a);
+    } catch (e) {
+    }
   }
   function pinAbsoluteChildren(irChildren, built, ctx) {
     var _a;
@@ -1385,11 +1416,12 @@
     }
   }
   async function buildText(node, ctx) {
+    var _a;
     const spec = node.text;
     if (!spec) return null;
     const text = figma.createText();
     const first = spec.runs[0];
-    const baseFont = first ? ctx.fonts.resolve(first.fontFamily, first.fontWeight, first.italic) : { family: "Inter", style: "Regular" };
+    const baseFont = first ? ctx.fonts.resolve(((_a = first.fontStack) == null ? void 0 : _a.length) ? first.fontStack.join(",") : first.fontFamily, first.fontWeight, first.italic) : { family: "Inter", style: "Regular" };
     try {
       text.fontName = baseFont;
     } catch (e) {
@@ -1414,11 +1446,26 @@
     }
     text.resize(Math.max(node.width, 1), Math.max(node.height, 1));
     text.textAutoResize = spec.singleLine ? "WIDTH_AND_HEIGHT" : "HEIGHT";
+    if (spec.maxLines) {
+      try {
+        text.textAutoResize = "HEIGHT";
+        text.resize(Math.max(node.width, 1), Math.max(node.height, 1));
+        text.textTruncation = "ENDING";
+        text.maxLines = spec.maxLines;
+      } catch (e) {
+      }
+    }
+    if (spec.glyphFill) {
+      const glyph = toFigmaPaint(spec.glyphFill, ctx);
+      if (glyph) text.fills = [glyph];
+    }
     applyEffects(text, node);
+    applyBlend(text, node);
     return text;
   }
   function applyRun(text, start, end, run, ctx) {
-    const font = ctx.fonts.resolve(run.fontFamily, run.fontWeight, run.italic);
+    var _a;
+    const font = ctx.fonts.resolve(((_a = run.fontStack) == null ? void 0 : _a.length) ? run.fontStack.join(",") : run.fontFamily, run.fontWeight, run.italic);
     try {
       text.setRangeFontName(start, end, font);
       text.setRangeFontSize(start, end, Math.max(1, run.fontSize));
@@ -1450,6 +1497,7 @@
     }
   }
   async function buildImage(node, ctx) {
+    var _a;
     if (!node.imageBytes) return null;
     try {
       const image = figma.createImage(node.imageBytes);
@@ -1457,7 +1505,11 @@
       rect.name = node.name;
       rect.resize(Math.max(node.width, 0.01), Math.max(node.height, 0.01));
       rect.opacity = node.opacity;
-      rect.fills = [{ type: "IMAGE", imageHash: image.hash, scaleMode: "FILL" }];
+      const scale = (_a = node.imageScale) != null ? _a : "CROP";
+      rect.fills = [
+        scale === "CROP" ? { type: "IMAGE", imageHash: image.hash, scaleMode: "CROP", imageTransform: [[1, 0, 0], [0, 1, 0]] } : { type: "IMAGE", imageHash: image.hash, scaleMode: scale }
+      ];
+      applyBlend(rect, node);
       applyCorners(rect, node, ctx);
       applyEffects(rect, node);
       return rect;
@@ -1490,6 +1542,7 @@
     }
   }
   function applyFills(node, ir, ctx) {
+    applyBlend(node, ir);
     if (ir.fills.length === 0) {
       node.fills = [];
       return;
@@ -1505,6 +1558,14 @@
       };
       return bindPaint(solid, bindableToken(paint.token, ctx), ctx.registry);
     }
+    if (paint.type === "IMAGE") {
+      try {
+        const image = figma.createImage(figma.base64Decode(paint.bytesBase64));
+        return { type: "IMAGE", imageHash: image.hash, scaleMode: paint.scaleMode };
+      } catch (e) {
+        return null;
+      }
+    }
     if (paint.type === "GRADIENT_LINEAR") {
       return {
         type: "GRADIENT_LINEAR",
@@ -1516,6 +1577,32 @@
       };
     }
     return null;
+  }
+  var BLEND_MODES = {
+    multiply: "MULTIPLY",
+    screen: "SCREEN",
+    overlay: "OVERLAY",
+    darken: "DARKEN",
+    lighten: "LIGHTEN",
+    "color-dodge": "COLOR_DODGE",
+    "color-burn": "COLOR_BURN",
+    "hard-light": "HARD_LIGHT",
+    "soft-light": "SOFT_LIGHT",
+    difference: "DIFFERENCE",
+    exclusion: "EXCLUSION",
+    hue: "HUE",
+    saturation: "SATURATION",
+    color: "COLOR",
+    luminosity: "LUMINOSITY",
+    "plus-lighter": "LINEAR_DODGE"
+  };
+  function applyBlend(node, ir) {
+    const mode = ir.blendMode ? BLEND_MODES[ir.blendMode] : void 0;
+    if (!mode) return;
+    try {
+      node.blendMode = mode;
+    } catch (e) {
+    }
   }
   function gradientTransform(angleDeg) {
     const rad = (angleDeg - 90) * Math.PI / 180;

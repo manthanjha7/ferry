@@ -11,6 +11,7 @@
  * the difference between a file you can edit and a pile of absolute frames.
  */
 
+import { bootAnimation, readAnimationSpec, settledMoment, type LiveAnimation } from "./animation";
 import { installVirtualClock, real, SETTLE_HORIZON_MS, type VirtualClock } from "./clock";
 import {
   DEFAULT_EXTRACT_OPTIONS,
@@ -127,6 +128,8 @@ export type RenderHandle = {
   /** Stylesheet hrefs the document asked for that did not resolve. */
   missingStylesheets: string[];
   dynamicContent: IRDocument["dynamicContent"];
+  /** Present when the document is a Claude Design animation, rendered live. */
+  animation?: LiveAnimation;
   dispose: () => void;
 };
 
@@ -240,18 +243,40 @@ export async function mountDocument(
   // colour resolves as a bare literal and the whole binding feature no-ops.
   await waitForStylesheets(adopted);
   emulateViewport(container, adopted, viewport);
+
+  // An animation project renders from its own .jsx modules, live. Its
+  // composition surface, not the page, is what gets measured.
+  const animationSpec = readAnimationSpec(html);
+  let animation: LiveAnimation | undefined;
+  if (animationSpec) {
+    try {
+      animation = await bootAnimation(container, animationSpec, options.moduleSources);
+    } catch (error) {
+      container.remove();
+      for (const node of adopted) node.remove();
+      restoreHost(host);
+      reveal.restore();
+      restoreWindowSize();
+      clock.uninstall();
+      throw error;
+    }
+  }
   await waitForAssets(container);
   await settleMotion(container, adopted, reveal.flush, clock);
   materializePseudoElements(container);
 
   return {
     container,
-    root: container,
+    // For an animation, the foreignObject holding the composition surface, so
+    // the walk's one child is the composition frame at its authored size.
+    root: animation ? (animation.surface.parentElement as unknown as HTMLElement) : container,
+    animation,
     adopted,
     imageSlots,
     dynamicContent: detectDynamicContent(parsed, resolveReport),
     missingStylesheets: findMissingStylesheets(adopted),
     dispose: () => {
+      animation?.unmount();
       container.remove();
       for (const node of adopted) node.remove();
       restoreHost(host);
@@ -1159,6 +1184,48 @@ export async function extractDocument(
   debug("mounted");
 
   try {
+    return await measureMounted(handle, html, name, opts);
+  } finally {
+    handle.dispose();
+  }
+}
+
+/**
+ * Every scene of a Claude Design animation as its own document, measured from
+ * ONE mount: the engine seeks between scenes, so its React tree, compiled
+ * modules and fonts are paid for once.
+ */
+export async function extractAnimationScenes(
+  html: string,
+  name: string,
+  options: Partial<ExtractOptions> = {},
+  onScene?: (done: number, total: number, label: string) => void,
+): Promise<{ docs: IRDocument[]; scenes: Array<{ name: string; dur: number }>; loop: boolean }> {
+  const opts = { ...DEFAULT_EXTRACT_OPTIONS, ...options };
+  const handle = await mountDocument(html, opts);
+  try {
+    const live = handle.animation;
+    if (!live) return { docs: [await measureMounted(handle, html, name, opts)], scenes: [], loop: false };
+    const docs: IRDocument[] = [];
+    for (let i = 0; i < live.scenes.length; i++) {
+      const scene = live.scenes[i];
+      onScene?.(i, live.scenes.length, scene.name);
+      live.seek(settledMoment(live, scene));
+      docs.push(await measureMounted(handle, html, `${name} · ${i + 1} ${scene.name}`, opts));
+    }
+    return { docs, scenes: live.scenes.map((s) => ({ name: s.name, dur: s.dur })), loop: live.loop };
+  } finally {
+    handle.dispose();
+  }
+}
+
+async function measureMounted(
+  handle: RenderHandle,
+  html: string,
+  name: string,
+  opts: ExtractOptions,
+): Promise<IRDocument> {
+  {
     const tokens = buildTokenIndex(
       ownedStylesheets(handle),
       inferSystemName(html) ?? name,
@@ -1306,8 +1373,6 @@ export async function extractDocument(
       missingStylesheets: handle.missingStylesheets,
       dynamicContent: handle.dynamicContent,
     };
-  } finally {
-    handle.dispose();
   }
 }
 

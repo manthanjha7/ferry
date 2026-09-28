@@ -279,3 +279,28 @@ export function stateHint(selected: StateAxis[], plan: CombinationPlan): string 
     ? `${plan.total} frames: ${breakdown}.`
     : `${plan.total} frames: ${breakdown}. The first varies fastest, one row per sweep.`;
 }
+
+/**
+ * An animation's scenes as a prototype that plays itself: each frame waits
+ * out its scene's duration and Smart Animates into the next, and a looping
+ * animation returns to its first scene. Smart Animate matches layers by name,
+ * which scene frames share because they are one element tree at different
+ * moments.
+ */
+export function sceneFlow(
+  docName: string,
+  scenes: Array<{ name: string; dur: number }>,
+  loop: boolean,
+): FlowSpec | null {
+  if (scenes.length < 2) return null;
+  const TRANSITION_S = 0.4;
+  const edges: FlowSpec["edges"] = [];
+  for (let i = 0; i + 1 < scenes.length; i++) {
+    edges.push({ from: i, to: i + 1, delay: Math.max(0.1, scenes[i].dur - TRANSITION_S), smart: true });
+  }
+  if (loop) {
+    const last = scenes.length - 1;
+    edges.push({ from: last, to: 0, delay: Math.max(0.1, scenes[last].dur - TRANSITION_S), smart: true });
+  }
+  return { name: `${docName} animation`, startIndex: 0, edges, section: null };
+}

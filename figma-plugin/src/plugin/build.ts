@@ -435,7 +435,7 @@ async function wireFlow(
 
     const list = bySource.get(from) ?? [];
     list.push({
-      trigger,
+      trigger: edge.delay !== undefined ? { type: "AFTER_TIMEOUT", timeout: Math.max(0.01, edge.delay) } : trigger,
       // `actions` (plural). The singular `action` field is deprecated in
       // @figma/plugin-typings 1.131.0.
       actions: [
@@ -443,7 +443,9 @@ async function wireFlow(
           type: "NODE",
           destinationId: to.id,
           navigation: "NAVIGATE",
-          transition: null,
+          transition: edge.smart
+            ? { type: "SMART_ANIMATE", easing: { type: "EASE_IN_AND_OUT" }, duration: 0.4 }
+            : null,
           resetScrollPosition: false,
         },
       ],

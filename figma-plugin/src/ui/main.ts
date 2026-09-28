@@ -17,7 +17,8 @@ import type {
   TargetSummary,
   VariableTarget,
 } from "../ir";
-import { documentStateAxes, extractDocument, extractStateMatrix } from "./extract";
+import { documentStateAxes, extractAnimationScenes, extractDocument, extractStateMatrix } from "./extract";
+import { readAnimationSpec } from "./animation";
 import { describeError, messageOf } from "../errors";
 import {
   BATCH_LIMIT,
@@ -34,6 +35,7 @@ import {
   defaultStateSelection,
   propCombinations,
   selectAxes,
+  sceneFlow,
   stateFlow,
   stateHint,
   type CombinationPlan,
@@ -729,10 +731,15 @@ function isClaudeDesignRuntimeFile(file: File): boolean {
  * so `ExtractOptions.moduleSources` stays genuinely absent rather than an
  * empty object that looks like "we checked and there's nothing".
  */
-async function collectModuleSources(assets: File[]): Promise<Record<string, string> | undefined> {
-  const jsFiles = assets.filter(
-    (file) => file.name.toLowerCase().endsWith(".js") && !isClaudeDesignRuntimeFile(file),
-  );
+export async function collectModuleSources(assets: File[]): Promise<Record<string, string> | undefined> {
+  // .jsx/.tsx too: an animation project's component lives in them. And the
+  // design system's own bundle, which its components are built from.
+  const jsFiles = assets.filter((file) => {
+    const lower = file.name.toLowerCase();
+    if (/\.(jsx|tsx)$/.test(lower)) return true;
+    if (!lower.endsWith(".js")) return false;
+    return !isClaudeDesignRuntimeFile(file) || lower === "_ds_bundle.js";
+  });
   if (jsFiles.length === 0) return undefined;
 
   const sources: Record<string, string> = {};
@@ -1418,7 +1425,25 @@ importButton.addEventListener("click", async () => {
         lastSkipped.push({ name: prepared.label, message: prepared.skipReason });
         continue;
       }
-      if (states.selected.length > 0 && screens.length === 1) {
+      if (readAnimationSpec(prepared.html!)) {
+        // A Claude Design animation: one frame per scene, wired to play itself.
+        const out = await extractAnimationScenes(
+          prepared.html!,
+          prepared.label,
+          extractOptions(prepared),
+          (done, total, label) => {
+            setStatus("working", `Capturing scene ${done + 1} of ${total}: ${label}…`);
+            showBatchProgress(done, total, 0);
+          },
+        );
+        const firstScene = docs.length;
+        docs.push(...out.docs);
+        if (screens.length === 1) {
+          columns = out.docs.length;
+          const sceneEdges = sceneFlow(prepared.label, out.scenes, out.loop);
+          flow = sceneEdges && firstScene === 0 ? sceneEdges : flow;
+        }
+      } else if (states.selected.length > 0 && screens.length === 1) {
         // One document, N times over: each combination of the props the user
         // ticked becomes its own top-level frame, and they ride the same batch
         // path a multi-screen import already uses.

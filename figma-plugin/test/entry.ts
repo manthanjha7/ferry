@@ -8,7 +8,7 @@
  * eyeballed inside Figma.
  */
 
-import { documentStateAxes, extractDocument, extractStateMatrix } from "../src/ui/extract";
+import { documentStateAxes, extractAnimationScenes, extractDocument, extractStateMatrix } from "../src/ui/extract";
 import { readZip } from "../src/ui/zip";
 import { enumerableProps, readPropsSchema } from "../src/ui/resolve";
 
@@ -26,6 +26,7 @@ import { enumerableProps, readPropsSchema } from "../src/ui/resolve";
 (window as unknown as Record<string, unknown>).loadPanel = () => import("../src/ui/main");
 
 (window as unknown as Record<string, unknown>).extractDocument = extractDocument;
+(window as unknown as Record<string, unknown>).extractAnimationScenes = extractAnimationScenes;
 (window as unknown as Record<string, unknown>).readZip = readZip;
 // The state matrix only exists in a browser: it mounts one document once per
 // combination, sequentially, against the real layout engine. The decisions it

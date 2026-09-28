@@ -658,7 +658,12 @@ export type FlowSpec = {
   /** Name for the flow starting point, e.g. "Portage Panel states". */
   name: string;
   startIndex: number;
-  edges: Array<{ from: number; to: number }>;
+  /**
+   * `delay` (seconds) makes an edge fire on its own, AFTER_TIMEOUT, instead of
+   * on click; `smart` animates between the two frames with Smart Animate.
+   * An animation's scenes use both, so the prototype plays itself.
+   */
+  edges: Array<{ from: number; to: number; delay?: number; smart?: boolean }>;
   /** SectionNode to group the frames into, or null to parent to the page. */
   section: string | null;
 };

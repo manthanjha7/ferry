@@ -4400,6 +4400,51 @@ async function scenarioS(ready: boolean): Promise<void> {
  * in for the real capture, which is gitignored, so the builder side of the fix
  * is exercised on every run rather than only when a real export is on disk.
  */
+async function scenarioW(ready: boolean): Promise<void> {
+  const p = "W (animation scenes play themselves):";
+  const names = [
+    `${p} each scene waits out its duration, then Smart Animates to the next`,
+    `${p} a looping animation returns from its last scene to its first`,
+  ];
+  if (!ready) {
+    for (const n of names) skip(n, "captured/fixture-screen.json not found");
+    return;
+  }
+  const mock = freshMock();
+  const result = await buildDocuments(
+    [batchDoc("Scene 1"), batchDoc("Scene 2"), batchDoc("Scene 3")],
+    { kind: "none" },
+    { columns: 3 },
+    () => {},
+    {
+      flow: {
+        name: "Mini animation",
+        startIndex: 0,
+        edges: [
+          { from: 0, to: 1, delay: 1.5, smart: true },
+          { from: 1, to: 2, delay: 2.2, smart: true },
+          { from: 2, to: 0, delay: 1.8, smart: true },
+        ],
+        section: null,
+      },
+    },
+  );
+  const trees = result.roots.map((root: any) => mock.serializeTree(root));
+  const first = trees[0].reactions?.[0];
+  const second = trees[1].reactions?.[0];
+  check(
+    names[0],
+    first?.trigger?.type === "AFTER_TIMEOUT" &&
+      first?.trigger?.timeout === 1.5 &&
+      first?.actions?.[0]?.transition?.type === "SMART_ANIMATE" &&
+      first?.actions?.[0]?.destinationId === result.roots[1].id &&
+      second?.trigger?.timeout === 2.2,
+    JSON.stringify(first),
+  );
+  const back = trees[2].reactions?.[0];
+  check(names[1], back?.actions?.[0]?.destinationId === result.roots[0].id && back?.trigger?.timeout === 1.8, JSON.stringify(back));
+}
+
 async function scenarioV(ready: boolean): Promise<void> {
   const p = "V (fidelity fields reach Figma):";
   const names = [
@@ -4793,6 +4838,11 @@ async function main(): Promise<void> {
     await scenarioV(fixtureReady);
   } catch (err) {
     failScenario("V", err);
+  }
+  try {
+    await scenarioW(fixtureReady);
+  } catch (err) {
+    failScenario("W", err);
   }
 
   if (scenarioAOut) {

@@ -1149,6 +1149,52 @@
           /native code/.test(String(window.setTimeout)) && /native code/.test(String(Date.now)),
         );
 
+        // --- Claude Design animation projects (test/fixture/anim-mini/) --------
+        // Rendered live from their .jsx with Ferry's own React and JSX compiler,
+        // then seeked scene by scene through the engine's seek event.
+        const miniHtml = await (await fetch("anim-mini/Mini.dc.html")).text();
+        const miniJsx = await (await fetch("anim-mini/mini-engine.jsx")).text();
+        const anim = await window.extractAnimationScenes(miniHtml, "Mini", {
+          viewportWidth: 1440,
+          moduleSources: { "mini-engine.jsx": miniJsx, "./mini-engine.jsx": miniJsx },
+        });
+        const visibleTexts = (doc) => {
+          const out = [];
+          (function w(n, op) {
+            const o = op * (n.opacity ?? 1);
+            if (n.kind === "TEXT" && o > 0.95) out.push(n.text.characters);
+            (n.children || []).forEach((c) => w(c, o));
+          })(doc.root, 1);
+          return out;
+        };
+        check(
+          "an animation project becomes one frame per scene, named for the scene, at the composition's size",
+          anim.docs.length === 3 &&
+            anim.docs[1].name === "Mini · 2 Reveal" &&
+            anim.docs[0].root.children[0]?.width === 800 &&
+            anim.docs[0].root.children[0]?.height === 450 &&
+            anim.loop === true &&
+            JSON.stringify(anim.scenes.map((s) => s.dur)) === "[1,1,1]",
+          `docs=${anim.docs.map((d) => d.name)} size=${anim.docs[0]?.root.children[0]?.width}x${anim.docs[0]?.root.children[0]?.height}`,
+        );
+        check(
+          "each scene is captured at its settled moment: what has built in is fully visible",
+          JSON.stringify(visibleTexts(anim.docs[0])) === JSON.stringify(["Hello"]) &&
+            JSON.stringify(visibleTexts(anim.docs[1])) === JSON.stringify(["Hello", "World"]),
+          `s1=${JSON.stringify(visibleTexts(anim.docs[0]))} s2=${JSON.stringify(visibleTexts(anim.docs[1]))}`,
+        );
+        check(
+          "a scene that builds in and fades out is captured in the middle, not faded out at its end",
+          visibleTexts(anim.docs[2]).includes("Bye"),
+          `s3=${JSON.stringify(visibleTexts(anim.docs[2]))}`,
+        );
+        check(
+          "a project whose .jsx was not dropped says which file is missing",
+          await window
+            .extractAnimationScenes(miniHtml, "Mini", { viewportWidth: 1440 })
+            .then(() => false, (e) => /mini-engine\.jsx/.test(String(e?.message))),
+        );
+
         // --- Two screens of one export that disagree (divergent-a/b.html) ------
         // The premise the sandbox half of this story rests on, measured rather
         // than assumed: two Claude Design documents can declare one token name
@@ -2341,6 +2387,26 @@
         // only be imported once the markup is in the page. test/entry.ts
         // exposes it as a lazy dynamic import for exactly this.
         const panel = await window.loadPanel();
+
+        // The same project the way a user brings it: as a .zip dropped on the
+        // panel, unpacked and collected by the panel's own code, not by hand.
+        {
+          const zipBlob = await (await fetch("anim-mini.zip")).blob();
+          const unzipped = await window.readZip(new File([zipBlob], "anim-mini.zip"));
+          const panelForZip = panel;
+          const page = unzipped.find((f) => f.name.endsWith(".html"));
+          const sources = await panelForZip.collectModuleSources(unzipped.filter((f) => f !== page));
+          const fromZip = await window.extractAnimationScenes(await page.text(), "Mini", {
+            viewportWidth: 1440,
+            moduleSources: sources,
+          });
+          check(
+            "an animation dropped as a .zip goes through the panel's own unpacking and still yields every scene",
+            fromZip.docs.length === 3 && !!sources?.["mini-engine.jsx"],
+            `docs=${fromZip.docs.length} sources=${Object.keys(sources ?? {})}`,
+          );
+        }
+
 
         const flatten = (node, out = []) => {
           out.push(node);

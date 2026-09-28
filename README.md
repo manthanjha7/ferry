@@ -204,6 +204,17 @@ progress; without that a few thousand nodes freeze the editor with no feedback
 and no way out. The whole import commits as a single undo step, and a build that
 throws removes its partial tree rather than leaving half a screen on the canvas.
 
+## Animation projects
+
+A Claude Design animation project (a `.dc.html` that declares `window.OM_SCENES` and mounts one component from sibling `.jsx` files) is rendered for real: Ferry bundles React 18.3.1, compiles the JSX with Sucrase, and drives the engine's own `data-om-seek-to-time-frame` event. Each scene becomes a frame, captured at the moment in the scene where the most content is fully on screen. The frames are wired as a prototype that plays itself: each waits out its scene's duration, Smart Animates to the next, and loops when the project loops. Import the whole project `.zip` so the `.jsx` files come along.
+
+## Motion, viewport and what the page paints outside the DOM
+
+- The page is measured at the design's size (1440x900 by default), not the plugin window's: `vw`/`vh` units become px and size media queries are answered for the design.
+- Entrance animations and transitions are finished, infinite loops reset to rest, scroll-driven animations cancelled, scroll-reveal observers report everything visible, and the document's own reduced-motion rules apply.
+- A document's script runs its timers and animation frames on a virtual clock, so counters and typewriters reach their end; slow intervals (slideshows) do not advance.
+- `::before`/`::after` become real layers; rotation, gradient text, z-index order, ellipsis and line-clamp, `object-fit`, blend modes, text-shadow, percentage radii, canvas and video poster frames, SVG images and CSS background images all import.
+
 ## Tests
 
 Two suites, because the plugin has two halves that go wrong in different ways.
@@ -215,7 +226,7 @@ and reports every assertion by name, with no npm dependencies of its own:
 ```bash
 cd figma-plugin
 npx esbuild test/entry.ts --bundle --outfile=test/fixture/bundle.js --target=es2020 --format=iife
-node test/e2e/harness-headless.mjs        # 196 checks
+node test/e2e/harness-headless.mjs        # 201 checks
 ```
 
 It covers alias resolution, category-aware numeric matching, flex and inferred
@@ -233,7 +244,7 @@ builds. Nothing in `src/` is stubbed:
 
 ```bash
 npx esbuild test/e2e/run.ts --bundle --outfile=test/e2e/run.mjs --format=esm --platform=node --target=node18
-node test/e2e/run.mjs                      # 133 checks
+node test/e2e/run.mjs                      # 135 checks
 ```
 
 It covers batch layout and spacing, state enumeration, prototype flows, variable
@@ -247,7 +258,7 @@ look at.
 ## Status
 
 Both halves are exercised and the plugin runs inside Figma. The extractor is
-covered by 196 browser assertions and the builder by 133 end-to-end assertions
+covered by 201 browser assertions and the builder by 135 end-to-end assertions
 against a mock Figma API, and real Claude Design exports have been imported
 through the real code path, including the multi-screen panel system this was
 built against.
