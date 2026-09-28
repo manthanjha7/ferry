@@ -232,6 +232,7 @@ export async function mountDocument(
   }
 
   const imageSlots = stubImageSlots(parsed);
+  fixJsxSvgAttributes(parsed);
   // An offscreen lazy image may never be judged near the viewport, so never loads.
   for (const img of Array.from(parsed.querySelectorAll("img[loading='lazy'], iframe[loading='lazy']"))) {
     img.setAttribute("loading", "eager");
@@ -1282,6 +1283,38 @@ async function waitForStylesheets(nodes: Element[]): Promise<void> {
     ),
     new Promise((resolve) => real.setTimeout(resolve, 5000)),
   ]);
+}
+
+/**
+ * React spells SVG presentation attributes in camelCase (`strokeWidth`,
+ * `strokeDasharray`, `textAnchor`) and converts them when it renders. Claude
+ * Design writes them that way in its markup too, and without React the HTML
+ * parser lowercases them to names SVG ignores: a thick dashed "pace" line
+ * imported as a thin solid one. They are renamed to the real attributes here.
+ */
+const JSX_SVG_ATTRIBUTES: Record<string, string> = {
+  strokewidth: "stroke-width", strokedasharray: "stroke-dasharray", strokedashoffset: "stroke-dashoffset",
+  strokelinecap: "stroke-linecap", strokelinejoin: "stroke-linejoin", strokemiterlimit: "stroke-miterlimit",
+  strokeopacity: "stroke-opacity", fillopacity: "fill-opacity", fillrule: "fill-rule", cliprule: "clip-rule",
+  clippath: "clip-path", textanchor: "text-anchor", dominantbaseline: "dominant-baseline",
+  alignmentbaseline: "alignment-baseline", baselineshift: "baseline-shift", fontsize: "font-size",
+  fontfamily: "font-family", fontweight: "font-weight", fontstyle: "font-style", letterspacing: "letter-spacing",
+  wordspacing: "word-spacing", stopcolor: "stop-color", stopopacity: "stop-opacity", floodcolor: "flood-color",
+  floodopacity: "flood-opacity", lightingcolor: "lighting-color", markerstart: "marker-start",
+  markermid: "marker-mid", markerend: "marker-end", vectoreffect: "vector-effect", shaperendering: "shape-rendering",
+  textrendering: "text-rendering", imagerendering: "image-rendering", pointerevents: "pointer-events",
+  writingmode: "writing-mode", colorinterpolationfilters: "color-interpolation-filters", xlinkhref: "href",
+};
+
+function fixJsxSvgAttributes(doc: Document): void {
+  for (const el of Array.from(doc.querySelectorAll("svg, svg *"))) {
+    for (const attr of Array.from(el.attributes)) {
+      const real = JSX_SVG_ATTRIBUTES[attr.name];
+      if (!real) continue;
+      if (!el.hasAttribute(real)) el.setAttribute(real, attr.value);
+      el.removeAttribute(attr.name);
+    }
+  }
 }
 
 /** Request every font face the mounted text uses, so its download is under way. */
@@ -2867,7 +2900,17 @@ function deriveLayout(
  * Wrapping rows are left alone. The approach is Figit's (MIT) layout check.
  */
 function verifyFlexRow(layout: IRLayout, children: IRNode[], box: DOMRect): IRLayout | undefined {
-  if (layout.wrap) return layout;
+  if (layout.wrap) {
+    // A wrapping row that rendered as ONE line is a row: left wrapping, Figma's
+    // slightly wider items broke it in two (a header's "+ Add lead" dropped
+    // under the search box). Verified as a row instead, pushes and all.
+    const flowing = children.filter((c) => !c.absolute);
+    const cross = (n: IRNode) => (layout.mode === "HORIZONTAL" ? n.y : n.x);
+    const size = (n: IRNode) => (layout.mode === "HORIZONTAL" ? n.height : n.width);
+    const oneLine = flowing.every((n) => cross(n) < cross(flowing[0]) + size(flowing[0]) - 1 && cross(flowing[0]) < cross(n) + size(n) - 1);
+    if (!oneLine) return layout;
+    layout = { ...layout, wrap: false };
+  }
   const flow = children.filter((c) => !c.absolute);
   if (flow.length < 2) return layout;
   const horizontal = layout.mode === "HORIZONTAL";
