@@ -26,7 +26,12 @@ for (const c of contexts) {
   try { if (await evaluate(cdp, sessionId, "!!document.getElementById('cd2f-import')", { contextId: c.id, timeout: 2000 })) ui = c.id; } catch {}
 }
 const bundle = readFileSync(new URL("../fixture/bundle.js", import.meta.url), "utf8");
-await evaluate(cdp, sessionId, `window.extractDocument ? true : (${JSON.stringify(bundle)}, (0, eval)(${JSON.stringify(bundle)}), true)`, { contextId: ui, timeout: 60000 });
+// The panel's own measuring frame when the self-test build exposes it, so this
+// measures exactly where an import does; otherwise the test bundle, in the
+// panel's own (quirks-mode) page.
+const realm = await evaluate(cdp, sessionId, `!!window.__ferryRealm`, { contextId: ui });
+if (realm) await evaluate(cdp, sessionId, `window.__ferryRealm.resetExtractor(); window.extractDocument = (...a) => window.__ferryRealm.extractor(1440).extractDocument(...a); true`, { contextId: ui });
+else await evaluate(cdp, sessionId, `window.extractDocument ? true : (${JSON.stringify(bundle)}, (0, eval)(${JSON.stringify(bundle)}), true)`, { contextId: ui, timeout: 60000 });
 const sources = {};
 for (const m of mods) { const t = readFileSync(m, "utf8"); sources[basename(m)] = t; sources["./" + basename(m)] = t; }
 const html = readFileSync(htmlPath, "utf8");
@@ -39,8 +44,12 @@ for (let i = 0; i < 1000; i++) {
   if (out) break;
   await sleep(200);
 }
+if (process.env.IR_OUT) {
+  const full = await evaluate(cdp, sessionId, "JSON.stringify(window.__out)", { contextId: ui });
+  (await import("node:fs")).writeFileSync(process.env.IR_OUT, full);
+}
 await evaluate(cdp, sessionId, "window.__out = null; true", { contextId: ui });
 console.log(`took ${Date.now() - t0}ms`, (out || "(no result)").slice(0, 300));
 const i = logs.map((l) => /\[cd2f\] mounting/.test(l)).lastIndexOf(true);
-console.log(logs.slice(Math.max(0, i)).filter((l) => /cd2f|EXCEPTION|error/i.test(l) && !/walking </.test(l)).slice(0, 40).join("\n"));
+console.log(logs.slice(Math.max(0, i)).filter((l) => /cd2f|EXCEPTION|error/i.test(l) && !/walking </.test(l)).filter((l) => !process.env.GREP || l.includes(process.env.GREP)).slice(0, 80).join("\n"));
 cdp.close();

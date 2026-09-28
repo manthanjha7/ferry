@@ -1247,6 +1247,68 @@
         const arrow = L("Arrow link");
         const lead = arrow?.children?.find((c) => c.kind === "TEXT");
         check("the space before an inline arrow survives (\"work \u2193\", not \"work\u2193\")", lead?.text?.characters === "Explore my work ", JSON.stringify(lead?.text?.characters));
+        {
+          const card = L("Accent card");
+          const strip = card?.children?.find((c) => c.name === "Left border");
+          check(
+            "a border side in its own colour becomes a strip on that edge, and leaves the stroke",
+            !!strip && strip.absolute === true && strip.width === 4 && strip.height === card.height && strip.x === 0 &&
+              Math.round(strip.fills[0].color.g * 255) === 162 && card.border.weights.left === 0 && card.border.weights.top === 1 &&
+              Math.round(card.border.paint.color.r * 255) === 200,
+            JSON.stringify({ strip: strip && [strip.x, strip.width, strip.height], weights: card?.border?.weights }),
+          );
+          const top = L("Top accent");
+          check(
+            "the accent is the side that differs, not the first side drawn",
+            top?.children?.length === 1 && top.children[0].name === "Top border" && top.border.weights.top === 0 && top.border.weights.left === 1,
+            JSON.stringify({ kids: top?.children?.map((c) => c.name), weights: top?.border?.weights }),
+          );
+        }
+        {
+          const t = (function f(n) { return n.kind === "TEXT" && n.text.characters.startsWith("+ 9 more") ? n : (n.children || []).map(f).find(Boolean) || null; })(lc.root);
+          const runAt = (word) => t?.text?.runs?.find((r) => t.text.characters.slice(r.start, r.end).includes(word));
+          const link = runAt("show all");
+          const faded = runAt("loan");
+          const plain = runAt("Ashok");
+          check(
+            "a link underlined with a bottom border keeps an underline in the border's colour and weight",
+            link?.decoration === "UNDERLINE" && link.underline?.thickness === 2 && Math.round(link.underline.paint.color.r * 255) === 122,
+            JSON.stringify(link && { d: link.decoration, u: link.underline }),
+          );
+          check(
+            "a faded inline span carries its opacity in the run's colour",
+            !!faded && !!plain && Math.abs(faded.fill.color.a - plain.fill.color.a * 0.5) < 0.01 && plain.decoration === "NONE",
+            JSON.stringify({ faded: faded?.fill?.color?.a, plain: plain?.fill?.color?.a }),
+          );
+        }
+        {
+          // Figma writes a script in front of the panel's doctype, so the panel
+          // runs in quirks mode. A quirks host, measuring through the frame.
+          const bundleText = await (await fetch("bundle.js")).text();
+          const quirks = document.createElement("iframe");
+          quirks.style.cssText = "position:absolute;left:0;top:0;width:400px;height:620px;opacity:0";
+          document.body.appendChild(quirks);
+          const qd = quirks.contentDocument;
+          qd.open(); qd.write("<script>0<\/script><html><head></head><body></body></html>"); qd.close();
+          const qs = qd.createElement("script"); qs.textContent = bundleText; qd.head.appendChild(qs);
+          const qw = quirks.contentWindow;
+          qw.__FERRY_EXTRACTOR_SOURCE__ = bundleText;
+          const strutHtml = '<!DOCTYPE html><html><body style="margin:0"><div data-name="Strut row" style="width:300px;font:40px Georgia,serif"><span style="font-size:10px">tiny</span></div></body></html>';
+          const inHost = await qw.extractDocument(strutHtml, "Strut", { viewportWidth: 1440 });
+          const x = qw.ferryRealm.extractor(1440);
+          const viaFrame = qw.ferryRealm.adopt(await x.extractDocument(strutHtml, "Strut", { viewportWidth: 1440 }));
+          const find = (d) => (function f(n) { return n.name === "Strut row" || (n.kind === "TEXT" && n.text.characters === "tiny") ? n : (n.children || []).map(f).find(Boolean) || null; })(d.root);
+          const frameDoc = qw.document.querySelector("iframe")?.contentDocument;
+          check(
+            "measured through its own frame, a design renders in standards mode even from a quirks-mode panel",
+            qd.compatMode === "BackCompat" && frameDoc?.compatMode === "CSS1Compat" && find(viaFrame)?.height >= 40 && find(inHost)?.height < 20,
+            JSON.stringify({ host: qd.compatMode, frame: frameDoc?.compatMode, viaFrame: find(viaFrame)?.height, inHost: find(inHost)?.height }),
+          );
+          quirks.remove();
+        }
+        const tight = (function f(n) { return n.kind === "TEXT" && n.text.characters.startsWith("Tight leading") ? n : (n.children || []).map(f).find(Boolean) || null; })(lc.root);
+        check("a wrapped paragraph whose glyph boxes overlap the next line (tight leading) is still wrapped", tight?.text?.singleLine === false, JSON.stringify(tight && { single: tight.text.singleLine, h: tight.height }));
+        check("preconnect links are not reported as missing stylesheets", lc.missingStylesheets.length === 0, JSON.stringify(lc.missingStylesheets));
         const score = (function f(n) { return n.kind === "TEXT" && n.text.characters === "3/10" ? n : (n.children || []).map(f).find(Boolean) || null; })(lc.root);
         check("a big number with a smaller \"/10\" on its baseline is still one line", score?.text?.singleLine === true, JSON.stringify(score?.text && { single: score.text.singleLine, h: score.height }));
         check(

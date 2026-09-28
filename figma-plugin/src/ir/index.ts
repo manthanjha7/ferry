@@ -128,6 +128,12 @@ export type IRTextRun = {
   letterSpacing: number;
   fill: IRSolidPaint;
   decoration: "NONE" | "UNDERLINE" | "STRIKETHROUGH";
+  /**
+   * An underline drawn as a bottom border on an inline element (a link styled
+   * `text-decoration: none; border-bottom: 1px solid`): its own colour and
+   * thickness, since a Figma underline defaults to the text's.
+   */
+  underline?: { paint: IRSolidPaint; thickness: number };
   textCase: "ORIGINAL" | "UPPER" | "LOWER" | "TITLE";
   /** Populated when the run came from an <a href>. */
   href?: string;

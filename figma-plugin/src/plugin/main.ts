@@ -236,6 +236,8 @@ async function selftest(message: { type: string; scale?: number }): Promise<void
           base.characters = node.characters;
           base.font = node.fontName === figma.mixed ? "mixed" : `${(node.fontName as FontName).family} ${(node.fontName as FontName).style}`;
           base.size = node.fontSize === figma.mixed ? "mixed" : node.fontSize;
+          base.align = node.textAlignHorizontal;
+          base.resize = node.textAutoResize;
           if (node.textTruncation !== "DISABLED") base.truncation = `${node.textTruncation}/${node.maxLines}`;
         }
         if ("fills" in n && Array.isArray(n.fills) && (n.fills as Paint[]).length) {

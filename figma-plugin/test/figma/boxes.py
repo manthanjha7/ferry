@@ -9,6 +9,7 @@ ref = json.load(open(sys.argv[1]))
 tree = json.load(open(sys.argv[2]))
 tol = float(sys.argv[3]) if len(sys.argv) > 3 else 2
 figma = {}
+texts = []
 import math
 def bbox(n, x, y):
     """A rotated Figma layer's x/y is its turned top-left corner; compare its bounding box."""
@@ -23,17 +24,30 @@ def bbox(n, x, y):
 def walk(n, ox=0, oy=0, top=False):
     x, y = (0, 0) if top else (ox + n["x"], oy + n["y"])
     bx, by, bw, bh = bbox(n, x, y)
-    entry = {"x": round(bx, 1), "y": round(by, 1), "w": round(bw, 1), "h": round(bh, 1), "type": n["type"]}
+    entry = {"x": round(bx, 1), "y": round(by, 1), "w": round(bw, 1), "h": round(bh, 1), "type": n["type"], "align": n.get("align", "LEFT")}
     figma.setdefault(n["name"], []).append(entry)
     if n["type"] == "TEXT":
-        figma.setdefault("text:" + " ".join(n.get("characters", "").split()).lower(), []).append(entry)
+        chars = " ".join(n.get("characters", "").split()).lower()
+        figma.setdefault("text:" + chars, []).append(entry)
+        texts.append(dict(entry, chars=chars))
     for c in n.get("children", []):
         walk(c, x, y)
 for f in tree["frames"]:
     walk(f, top=True)
+def inline(b):
+    """A span inside a longer text layer ("7" in "7 confirmed of the 12"):
+    Figma carries it as a styled run, not a layer of its own. Present if a text
+    layer holds those words and covers where the span was drawn."""
+    if not b.get("text"):
+        return False
+    words = " ".join(b["text"].split()).lower()
+    mx, my = b["x"] + b["w"] / 2, b["y"] + b["h"] / 2
+    return any(words in t["chars"] and t["x"] - 4 <= mx <= t["x"] + t["w"] + 4 and t["y"] - 4 <= my <= t["y"] + t["h"] + 4 for t in texts)
 bad = 0
 for b in ref:
     cands = (figma.get(b["name"]) if b["name"] else None) or (figma.get("text:" + " ".join(b["text"].split()).lower()) if b.get("text") else None)
+    if not cands and inline(b):
+        continue
     if not cands:
         print(f"MISSING  {b['name'] or 'text:' + (b.get('text') or '')[:40]}")
         bad += 1
@@ -41,6 +55,8 @@ for b in ref:
     c = min(cands, key=lambda c: abs(c["x"] - b["x"]) + abs(c["y"] - b["y"]))
     kind = b.get("kind", "box")
     by_text = not (b["name"] and figma.get(b["name"]))
+    if by_text and abs(c["x"] - b["x"]) + abs(c["y"] - b["y"]) > 200 and inline(b):
+        continue
     if by_text and abs(c["x"] - b["x"]) + abs(c["y"] - b["y"]) > 200:
         # A repeated text ("41", "5") whose nearest copy is far away is not this one.
         print(f"MISSING  near {b['name'] or 'text:' + (b.get('text') or '')[:40]}")
@@ -50,8 +66,16 @@ for b in ref:
         # A padded box (a tab, a pill) matched by its words: compare centres.
         kind = "centre"
     if kind == "glyph" and c["type"] == "TEXT":
-        # Glyph box vs line box: compare the left edge and the vertical centre.
-        d = {"cx": round((c["x"] + c["w"] / 2) - (b["x"] + b["w"] / 2), 1), "cy": round((c["y"] + c["h"] / 2) - (b["y"] + b["h"] / 2), 1)}
+        # Glyph box vs line box: the edge the text is aligned to, and the
+        # vertical centre. A text layer that fills its column is wider than its
+        # words; where the words start is what a designer sees.
+        cy = round((c["y"] + c["h"] / 2) - (b["y"] + b["h"] / 2), 1)
+        if c["w"] > b["w"] + tol and c.get("align") == "LEFT":
+            d = {"x": round(c["x"] - b["x"], 1), "cy": cy}
+        elif c["w"] > b["w"] + tol and c.get("align") == "RIGHT":
+            d = {"right": round((c["x"] + c["w"]) - (b["x"] + b["w"]), 1), "cy": cy}
+        else:
+            d = {"cx": round((c["x"] + c["w"] / 2) - (b["x"] + b["w"] / 2), 1), "cy": cy}
     elif kind == "centre":
         d = {"cx": round((c["x"] + c["w"] / 2) - (b["x"] + b["w"] / 2), 1), "cy": round((c["y"] + c["h"] / 2) - (b["y"] + b["h"] / 2), 1)}
     elif kind == "block" and c["type"] == "TEXT":

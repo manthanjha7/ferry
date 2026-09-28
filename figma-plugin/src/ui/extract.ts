@@ -1275,7 +1275,7 @@ function findMissingStylesheets(nodes: Element[]): string[] {
   const missing: string[] = [];
 
   for (const node of nodes) {
-    if (node.tagName !== "LINK") continue;
+    if (!isStylesheetLink(node)) continue;
     const link = node as HTMLLinkElement;
 
     const href = link.getAttribute("href");
@@ -1295,15 +1295,32 @@ function findMissingStylesheets(nodes: Element[]): string[] {
   return missing;
 }
 
+/**
+ * A `<link>` that carries CSS. Every Claude Design export also has two
+ * `rel="preconnect"` links to Google Fonts; they never get a `sheet`, so
+ * counting them reported two "missing stylesheets" on every import.
+ */
+function isStylesheetLink(node: Element): node is HTMLLinkElement {
+  return node.tagName === "LINK" && /(^|\s)stylesheet(\s|$)/i.test(node.getAttribute("rel") ?? "");
+}
+
+/** The one remote origin the manifest allows a stylesheet from. */
+const FONT_SERVICE = /^https:\/\/fonts\.googleapis\.com\//i;
+
 async function waitForStylesheets(nodes: Element[]): Promise<void> {
   const links = nodes
-    .filter((node): node is HTMLLinkElement => node.tagName === "LINK")
-    // An absolute http(s) stylesheet — a font service, typically — can never
-    // load: the plugin declares no network access at all. Waiting on one costs
-    // the full timeout and buys nothing, which is why a document linking Google
-    // Fonts took 11 seconds to extract while a larger one took 0.8. It still
-    // gets reported as a missing stylesheet, which is the honest outcome.
-    .filter((link) => !/^https?:/i.test(link.getAttribute("href") ?? ""));
+    .filter(isStylesheetLink)
+    // Any other absolute http(s) stylesheet can never load: the manifest
+    // allows Google Fonts and nothing else. Waiting on one costs the full
+    // timeout and buys nothing (a document linking a font service took 11
+    // seconds where a larger one took 0.8), and it is still reported as
+    // missing. Google Fonts is waited for: its @font-face rules have to be in
+    // place before the used faces are requested, or the page is measured in
+    // the fallback font.
+    .filter((link) => {
+      const href = link.getAttribute("href") ?? "";
+      return !/^https?:/i.test(href) || FONT_SERVICE.test(href);
+    });
 
   if (links.length === 0) return;
 
@@ -1358,14 +1375,26 @@ function fixJsxSvgAttributes(doc: Document): void {
 /** Request every font face the mounted text uses, so its download is under way. */
 async function loadUsedFaces(container: HTMLElement): Promise<void> {
   if (!document.fonts?.load) return;
-  const faces = new Set<string>();
+  // Each face with the characters it has to draw. A web font is split into
+  // unicode-range files, and `load(font)` alone fetches only the one that
+  // covers a space. "₹" lives in Hind's Devanagari file, which arrived after
+  // measuring: its taller metrics then set the line in the browser but not in
+  // Ferry, and every lead row came in 2px short.
+  const faces = new Map<string, Set<string>>();
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
   for (let node = walker.nextNode(); node && faces.size < 60; node = walker.nextNode()) {
     if (!node.textContent?.trim() || !node.parentElement) continue;
     const cs = getComputedStyle(node.parentElement);
-    faces.add(`${cs.fontStyle} ${cs.fontWeight} 16px ${cs.fontFamily}`);
+    const key = `${cs.fontStyle} ${cs.fontWeight} 16px ${cs.fontFamily}`;
+    const chars = faces.get(key) ?? new Set<string>();
+    for (const ch of node.textContent) if (chars.size < 400) chars.add(ch);
+    faces.set(key, chars);
   }
-  await Promise.all(Array.from(faces).map((font) => document.fonts.load(font).catch(() => [])));
+  await Promise.all(
+    Array.from(faces).map(([font, chars]) =>
+      document.fonts.load(font, Array.from(chars).join("") || " ").catch(() => []),
+    ),
+  );
 }
 
 async function waitForAssets(scope: HTMLElement): Promise<void> {
@@ -2387,14 +2416,19 @@ async function walkMeasured(
   applyChildSizing(children, el, layout);
   if (!layout) orderByStacking(children, sources);
 
+  const border = borders(el, style, ctx);
+  const radii = cornerRadii(style);
+  // Beneath the content, like the CSS border they stand for.
+  children.unshift(...accentBorders(el, style, border, base, radii, clipsContent(style), ctx));
+
   return {
     kind: "FRAME",
     name: frameName(el, layout, style, base),
     ...base,
     layout,
     fills: backgroundPaints(el, style, ctx),
-    border: borders(el, style, ctx),
-    cornerRadius: cornerRadii(style),
+    border,
+    cornerRadius: radii,
     cornerToken: cornerToken(el, style, ctx),
     effects: effects(style, ctx),
     children,
@@ -3253,7 +3287,7 @@ function extractText(
 
       const start = characters.length;
       characters += value;
-      runs.push(makeRun(start, characters.length, owner, ctx));
+      runs.push(makeRun(start, characters.length, owner, ctx, true, el));
       return;
     }
 
@@ -3307,16 +3341,49 @@ function extractText(
   const box = contents.getBoundingClientRect();
   const presented = asTextPresentation(characters, trimmed);
 
-  return {
+  const out = {
     characters: presented.characters,
     runs: presented.runs,
     align: mapTextAlign(style.textAlign),
-    verticalAlign: "TOP",
+    verticalAlign: "TOP" as const,
     // Lines counted, not guessed from height: a display face set tight
     // (148px at line-height 0.86) has glyph boxes taller than 1.5 lines of its
     // own line height, and read as wrapped it was given a wrapping box.
     singleLine: !characters.includes("\n") && (countLines(contents) === 1 || box.height <= tallestRun * 1.5),
   };
+  return out;
+}
+
+/**
+ * What the inline elements around a run add to it that a text run has no
+ * field for: their opacity, and a bottom border standing in for an underline.
+ * Walks up only through `display: inline` boxes; the first block is the text
+ * layer itself, whose opacity is the layer's.
+ */
+function inlineDressing(owner: HTMLElement, layer: HTMLElement): {
+  opacity: number;
+  underline?: { color: IRColor; thickness: number; el: HTMLElement };
+} {
+  let opacity = 1;
+  let underline: { color: IRColor; thickness: number; el: HTMLElement } | undefined;
+  for (let el: HTMLElement | null = owner; el && el !== layer; el = el.parentElement) {
+    const cs = getComputedStyle(el);
+    if (cs.display !== "inline") break;
+    opacity *= parseFloat(cs.opacity) || (cs.opacity === "0" ? 0 : 1);
+    const bottom = px(cs.borderBottomWidth);
+    if (
+      !underline &&
+      bottom > 0 &&
+      cs.borderBottomStyle !== "none" &&
+      px(cs.borderTopWidth) === 0 &&
+      px(cs.borderLeftWidth) === 0 &&
+      px(cs.borderRightWidth) === 0
+    ) {
+      const color = parseColor(cs.borderBottomColor);
+      if (color && color.a > 0) underline = { color, thickness: bottom, el };
+    }
+  }
+  return { opacity, underline };
 }
 
 /**
@@ -3359,7 +3426,15 @@ function countLines(range: Range): number {
   const bands: Array<{ top: number; bottom: number }> = [];
   for (const rect of Array.from(range.getClientRects())) {
     if (rect.width < 0.5 || rect.height < 0.5) continue;
-    const band = bands.find((b) => rect.top < b.bottom - 1 && b.top < rect.bottom - 1);
+    // Same line when either box's middle falls inside the other. Plain
+    // overlap is not enough: a face whose glyph box is taller than the line
+    // height (Hind at 15.5/1.45: 24px boxes on a 22.5px pitch) overlaps the
+    // next line's box too, and a three-line paragraph was counted as one line
+    // and imported as a single 973px line running into the next column.
+    const middle = (rect.top + rect.bottom) / 2;
+    const band = bands.find(
+      (b) => (middle > b.top && middle < b.bottom) || ((b.top + b.bottom) / 2 > rect.top && (b.top + b.bottom) / 2 < rect.bottom),
+    );
     if (band) {
       band.top = Math.min(band.top, rect.top);
       band.bottom = Math.max(band.bottom, rect.bottom);
@@ -3379,9 +3454,16 @@ function makeRun(
   // re-measuring the run would leave the glyphs and the box they sit in
   // disagreeing by a pixel or two. Everything else wants the real measurement.
   register = true,
+  // The text layer's own element. Inline boxes between it and the run add
+  // their opacity and underline to the run; its own belong to the layer.
+  layer: HTMLElement = owner,
 ): IRTextRun {
   const style = getComputedStyle(owner);
-  const color = parseColor(style.color) ?? { r: 0, g: 0, b: 0, a: 1 };
+  const inherited = inlineDressing(owner, layer);
+  const rawColor = parseColor(style.color) ?? { r: 0, g: 0, b: 0, a: 1 };
+  // A faded inline span ("Ashok Pal <span style=opacity:.65>loan</span>") has
+  // no layer of its own to carry the opacity, so it goes into the run's colour.
+  const color = inherited.opacity < 1 ? { ...rawColor, a: Math.round(rawColor.a * inherited.opacity * 1000) / 1000 } : rawColor;
   const anchor = owner.closest("a");
   const normalLeading = style.lineHeight === "normal";
 
@@ -3401,10 +3483,16 @@ function makeRun(
     lineHeight: normalLeading ? round(px(style.fontSize) * 1.25) : px(style.lineHeight),
     letterSpacing: style.letterSpacing === "normal" ? 0 : px(style.letterSpacing),
     fill: solid(color, ctx, inlineDeclaration(owner, "color")),
-    decoration: mapDecoration(style.textDecorationLine),
+    decoration: inherited.underline ? "UNDERLINE" : mapDecoration(style.textDecorationLine),
     textCase: mapTextCase(style.textTransform),
     href: anchor?.getAttribute("href") ?? undefined,
   };
+  if (inherited.underline) {
+    run.underline = {
+      paint: solid(inherited.underline.color, ctx, inlineDeclaration(inherited.underline.el, "border-bottom") ?? inlineDeclaration(inherited.underline.el, "border-bottom-color")),
+      thickness: inherited.underline.thickness,
+    };
+  }
 
   if (normalLeading && register) {
     ctx.pendingLineHeights.push({
@@ -3709,9 +3797,14 @@ function borders(
   }
   if (Object.values(weights).every((w) => w === 0)) return undefined;
 
-  // Pick the colour from whichever side actually has a border.
-  const side =
-    weights.top > 0 ? "Top" : weights.right > 0 ? "Right" : weights.bottom > 0 ? "Bottom" : "Left";
+  // The colour most of the drawn sides share, so a single accent side
+  // (`border-top: 3px solid red` on a faint box) is the odd one out and not
+  // the other three.
+  const drawn = (["Top", "Right", "Bottom", "Left"] as const).filter((sd) => weights[sd.toLowerCase() as "top"] > 0);
+  const colorKey = (sd: string) => (style as unknown as Record<string, string>)[`border${sd}Color`];
+  const side = drawn.reduce((best, sd) =>
+    drawn.filter((o) => colorKey(o) === colorKey(sd)).length > drawn.filter((o) => colorKey(o) === colorKey(best)).length ? sd : best,
+  drawn[0]);
   const color = sideColor(side) ?? { r: 0, g: 0, b: 0, a: 1 };
   if (color.a === 0) return undefined;
 
@@ -3722,6 +3815,74 @@ function borders(
     paint: solid(color, ctx, inlineDeclaration(el, "border") ?? inlineDeclaration(el, "border-color")),
     dashed: styleName === "dashed" || styleName === "dotted",
   };
+}
+
+/**
+ * A side whose colour differs from the rest of the border, as its own layer.
+ *
+ * A Figma stroke has one paint for all four sides. A lead card drawn
+ * `border: 1px solid <faint>; border-left: 4px solid <gold>` came in with a
+ * faint 4px left edge, and the gold accent that marks the card's grade was
+ * gone. The odd side becomes a strip pinned to that edge, under the content,
+ * and its width comes off the frame's stroke. The strip keeps the border's
+ * token, so it re-themes with the rest.
+ */
+function accentBorders(
+  el: HTMLElement,
+  style: CSSStyleDeclaration,
+  border: IRNode["border"],
+  base: { width: number; height: number },
+  radii: IRNode["cornerRadius"],
+  clips: boolean,
+  ctx: Ctx,
+): IRNode[] {
+  if (!border) return [];
+  const sides = [["top", "Top"], ["right", "Right"], ["bottom", "Bottom"], ["left", "Left"]] as const;
+  const colorOf = (side: string) =>
+    parseColor((style as unknown as Record<string, string>)[`border${side}Color`]);
+  const same = (a: IRColor | null, b: IRColor) =>
+    !!a && Math.abs(a.r - b.r) < 0.004 && Math.abs(a.g - b.g) < 0.004 && Math.abs(a.b - b.b) < 0.004 && Math.abs(a.a - b.a) < 0.004;
+  const main = border.paint.color;
+  const accents: IRNode[] = [];
+  for (const [key, side] of sides) {
+    const weight = border.weights[key];
+    const color = colorOf(side);
+    if (weight <= 0 || !color || same(color, main)) continue;
+    border.weights[key] = 0;
+    const W = base.width;
+    const H = base.height;
+    const box =
+      key === "left" ? { x: 0, y: 0, width: weight, height: H }
+      : key === "right" ? { x: W - weight, y: 0, width: weight, height: H }
+      : key === "top" ? { x: 0, y: 0, width: W, height: weight }
+      : { x: 0, y: H - weight, width: W, height: weight };
+    // A clipping frame rounds the strip for us; otherwise it takes the
+    // frame's own corners on its side.
+    const r = (c: number) => (clips ? 0 : c);
+    const cornerRadius =
+      key === "left" ? { tl: r(radii.tl), tr: 0, br: 0, bl: r(radii.bl) }
+      : key === "right" ? { tl: 0, tr: r(radii.tr), br: r(radii.br), bl: 0 }
+      : key === "top" ? { tl: r(radii.tl), tr: r(radii.tr), br: 0, bl: 0 }
+      : { tl: 0, tr: 0, br: r(radii.br), bl: r(radii.bl) };
+    accents.push({
+      kind: "FRAME",
+      name: `${side} border`,
+      ...box,
+      opacity: 1,
+      rotation: 0,
+      clips: false,
+      absolute: true,
+      fills: [solid(color, ctx, inlineDeclaration(el, `border-${key}`) ?? inlineDeclaration(el, `border-${key}-color`))],
+      cornerRadius,
+      effects: [],
+      children: [],
+    });
+  }
+  if (Object.values(border.weights).every((w) => w === 0)) {
+    // Every side was an accent: the stroke itself has nothing left to draw.
+    border.weights = { top: 0, right: 0, bottom: 0, left: 0 };
+  }
+  return accents;
 }
 
 /**

@@ -59,9 +59,23 @@ try {
   await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: scheme }] }, sessionId);
   await sleep(600);
   await cdp.send("Page.navigate", { url: `http://127.0.0.1:${port}/${encodeURI(page)}` }, sessionId);
-  await sleep(4000);
   const evalIn = async (expression) =>
     (await cdp.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, sessionId)).result?.value;
+  // Claude Design's runtime fetches React from a CDN before it renders, so a
+  // fixed wait sometimes captured an empty page (a 1px reference). Wait until
+  // the page has content and has stopped changing for 1.5s, up to 30s.
+  {
+    let last = "";
+    let stableSince = Date.now();
+    const start = Date.now();
+    await sleep(1500);
+    while (Date.now() - start < 30000) {
+      const sig = await evalIn(`document.readyState + ":" + document.body?.getElementsByTagName("*").length + ":" + (document.body?.innerText.length ?? 0) + ":" + document.documentElement.scrollHeight`).catch(() => "");
+      if (sig !== last) { last = sig; stableSince = Date.now(); }
+      else if (Date.now() - stableSince > 1500 && /^complete:[1-9]/.test(sig) && !/:0:/.test(sig)) break;
+      await sleep(250);
+    }
+  }
   // Figma ships Inter and Roboto, and so does the page Ferry measures in, so the
   // reference gets them too. A document's own font links load as they would.
   // Inter is Figma's own copy, the exact @font-face rules Ferry's panel has

@@ -56,7 +56,9 @@ const inlineUiPlugin = {
       await writeFile(
         resolve(root, "dist/ui.html"),
         template
-          .replace("/* __BUNDLE__ */", safe)
+          // A function, not a string: a replacement string expands `$&` and
+          // `$'`, which the embedded extractor source contains.
+          .replace("/* __BUNDLE__ */", () => safe)
           .replace("__BUILD__", stamp),
         "utf8",
       );
@@ -71,6 +73,20 @@ const pluginCtx = await esbuild.context({
   outfile: resolve(root, "dist/code.js"),
 });
 
+// The extractor runs in a standards-mode frame the panel writes itself
+// (src/ui/realm.ts), so it is its own bundle, embedded in the panel as text.
+const extractorBuild = await esbuild.build({
+  ...shared,
+  logLevel: "warning",
+  entryPoints: [resolve(root, "src/ui/extractor-entry.ts")],
+  write: false,
+  outfile: resolve(root, "dist/extractor.js"),
+  define: { "process.env.NODE_ENV": '"production"', __SELFTEST__: String(selftest) },
+  minify: true,
+  keepNames: true,
+});
+const extractorSource = extractorBuild.outputFiles[0].text;
+
 const uiCtx = await esbuild.context({
   ...shared,
   entryPoints: [resolve(root, "src/ui/main.ts")],
@@ -80,7 +96,11 @@ const uiCtx = await esbuild.context({
   // React ships a development build unless told otherwise, at four times the
   // size. Minified because the panel is one inlined HTML file; names kept so
   // a stack trace in a bug report still says where it came from.
-  define: { "process.env.NODE_ENV": '"production"', __SELFTEST__: String(selftest) },
+  define: {
+    "process.env.NODE_ENV": '"production"',
+    __SELFTEST__: String(selftest),
+    __EXTRACTOR_SOURCE__: JSON.stringify(extractorSource),
+  },
   minify: true,
   keepNames: true,
 });

@@ -17,8 +17,7 @@ import type {
   TargetSummary,
   VariableTarget,
 } from "../ir";
-import { documentStateAxes, extractAnimationScenes, extractDocument, extractStateMatrix } from "./extract";
-import { readAnimationSpec } from "./animation";
+import { adopt, extractor, resetExtractor } from "./realm";
 import { describeError, messageOf } from "../errors";
 import {
   BATCH_LIMIT,
@@ -507,7 +506,7 @@ async function refreshStates(): Promise<void> {
   let axes: StateAxis[] = [];
   try {
     const markup = only ? (only.html ?? (only.file ? await screenText(only.file) : "")) : "";
-    if (markup) axes = documentStateAxes(markup);
+    if (markup) axes = adopt(extractor().documentStateAxes(markup));
   } catch {
     // An unreadable file is the import loop's problem to report, with a name
     // and a place to put it. Here it is simply a screen with no states.
@@ -1394,6 +1393,9 @@ importButton.addEventListener("click", async () => {
   importButton.disabled = true;
   summary.style.display = "none";
   lastSkipped = [];
+  // A fresh measuring frame per import: nothing the last design's script left
+  // behind reaches this one.
+  resetExtractor();
 
   const docs: IRDocument[] = [];
   // Only ever non-empty for a single-screen selection (see `refreshStates`), so
@@ -1425,9 +1427,10 @@ importButton.addEventListener("click", async () => {
         lastSkipped.push({ name: prepared.label, message: prepared.skipReason });
         continue;
       }
-      if (readAnimationSpec(prepared.html!)) {
+      const measure = extractor(extractOptions(prepared).viewportWidth);
+      if (measure.readAnimationSpec(prepared.html!)) {
         // A Claude Design animation: one frame per scene, wired to play itself.
-        const out = await extractAnimationScenes(
+        const out = adopt(await measure.extractAnimationScenes(
           prepared.html!,
           prepared.label,
           extractOptions(prepared),
@@ -1435,7 +1438,7 @@ importButton.addEventListener("click", async () => {
             setStatus("working", `Capturing scene ${done + 1} of ${total}: ${label}…`);
             showBatchProgress(done, total, 0);
           },
-        );
+        ));
         const firstScene = docs.length;
         docs.push(...out.docs);
         if (screens.length === 1) {
@@ -1448,7 +1451,7 @@ importButton.addEventListener("click", async () => {
         // ticked becomes its own top-level frame, and they ride the same batch
         // path a multi-screen import already uses.
         docs.push(
-          ...(await extractStateMatrix(
+          ...adopt(await measure.extractStateMatrix(
             prepared.html!,
             prepared.label,
             {
@@ -1471,7 +1474,7 @@ importButton.addEventListener("click", async () => {
         flow = stateFlow(prepared.label, states.selected, states.plan);
       } else {
         docs.push(
-          await extractDocument(prepared.html!, prepared.label, extractOptions(prepared)),
+          adopt(await measure.extractDocument(prepared.html!, prepared.label, extractOptions(prepared))),
         );
       }
     } catch (error) {

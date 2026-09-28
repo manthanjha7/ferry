@@ -1532,6 +1532,18 @@
         unit: "PIXELS"
       });
       text.setRangeTextDecoration(start, end, run.decoration);
+      if (run.underline) {
+        try {
+          const paint = bindPaint(
+            { type: "SOLID", color: toRGB(run.underline.paint.color), opacity: run.underline.paint.color.a },
+            bindableToken(run.underline.paint.token, ctx),
+            ctx.registry
+          );
+          text.setRangeTextDecorationColor(start, end, { value: paint });
+          text.setRangeTextDecorationThickness(start, end, { value: run.underline.thickness, unit: "PIXELS" });
+        } catch (e) {
+        }
+      }
       text.setRangeTextCase(start, end, run.textCase);
       if (run.href) {
         text.setRangeHyperlink(start, end, { type: "URL", value: run.href });

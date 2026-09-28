@@ -8,7 +8,7 @@
  * eyeballed inside Figma.
  */
 
-import { documentStateAxes, extractAnimationScenes, extractDocument, extractStateMatrix } from "../src/ui/extract";
+import { documentStateAxes, extractAnimationScenes, extractDocument, extractStateMatrix, mountDocument } from "../src/ui/extract";
 import { readZip } from "../src/ui/zip";
 import { enumerableProps, readPropsSchema } from "../src/ui/resolve";
 
@@ -24,8 +24,16 @@ import { enumerableProps, readPropsSchema } from "../src/ui/resolve";
  * testable against the code that actually ships rather than a copy of it.
  */
 (window as unknown as Record<string, unknown>).loadPanel = () => import("../src/ui/main");
+// The panel measures in a frame of its own (src/ui/realm.ts) from source the
+// build embeds. Bundled here there is no embedded source, so the panel falls
+// back to this same-realm copy.
+import "../src/ui/extractor-entry";
+import { adopt, extractor, resetExtractor } from "../src/ui/realm";
+(window as unknown as Record<string, unknown>).ferryRealm = { adopt, extractor, resetExtractor };
 
 (window as unknown as Record<string, unknown>).extractDocument = extractDocument;
+// The mounted page itself, for probing what the extractor measured against.
+(window as unknown as Record<string, unknown>).mountDocument = mountDocument;
 (window as unknown as Record<string, unknown>).extractAnimationScenes = extractAnimationScenes;
 (window as unknown as Record<string, unknown>).readZip = readZip;
 // The state matrix only exists in a browser: it mounts one document once per
