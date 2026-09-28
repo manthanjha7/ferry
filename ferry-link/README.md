@@ -33,4 +33,11 @@ Then in Figma, click the design under **From Claude** in the Ferry panel, and **
   - the panel must be paired.
 - A design waits for a day, then is dropped. One that has been opened leaves the inbox.
 
-No dependencies: Node 18 or later. Tests: `node test/test.mjs`.
+## Where it works
+
+- **Claude Code** (the terminal, and the Code tab of the Claude desktop app): yes. Claude Code carries the Claude Design connector Ferry Link needs.
+- **Claude chat** (claude.ai, the desktop app's chat): not yet. The Claude Design connector isn't offered there, and it doesn't let other apps sign in to it. Until it is, designers without Claude Code download the project's .zip from Claude Design and drop it into Ferry.
+
+## Develop
+
+No dependencies: Node 18 or later. Tests: `node test/test.mjs` and `node test/robust.mjs`.
