@@ -35,7 +35,7 @@ Then in Figma, click the design under **From Claude** in the Ferry panel, and **
 
 ## Where it works
 
-- **Claude Code** (the terminal, and the Code tab of the Claude desktop app): yes. Claude Code carries the Claude Design connector Ferry Link needs.
+- **Claude Code in the terminal:** yes, tested end to end. Claude Code carries the Claude Design connector Ferry Link needs. (Claude Code in the desktop app uses the same plugins and should behave the same; not yet tested.)
 - **Claude chat** (claude.ai, the desktop app's chat): not yet. The Claude Design connector isn't offered there, and it doesn't let other apps sign in to it. Until it is, designers without Claude Code download the project's .zip from Claude Design and drop it into Ferry.
 
 ## Develop
