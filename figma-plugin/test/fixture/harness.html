@@ -1306,6 +1306,49 @@
           );
           quirks.remove();
         }
+        check(
+          "growing children Figma would split unequally keep their measured widths",
+          L("Narrow side")?.grow === false && L("Narrow side")?.sizing?.horizontal === "FIXED" && L("Wide side")?.sizing?.horizontal === "FIXED" && L("Wide side").width > L("Narrow side").width + 100,
+          JSON.stringify({ n: [L("Narrow side")?.width, L("Narrow side")?.sizing], w: [L("Wide side")?.width, L("Wide side")?.sizing] }),
+        );
+        check("equal growing children stay FILL", L("Even a")?.sizing?.horizontal === "FILL" && L("Even b")?.grow === true, JSON.stringify({ a: L("Even a")?.sizing, b: L("Even b")?.sizing }));
+        {
+          const tr = L("Track row");
+          check("a grid with one row of tracks is a row that cannot wrap", tr?.layout?.mode === "HORIZONTAL" && tr.layout.wrap === false, JSON.stringify(tr?.layout && { m: tr.layout.mode, w: tr.layout.wrap }));
+          const cg = L("Card grid");
+          const cells = (cg?.children || []).filter((c) => !c.absolute);
+          const line = cells.filter((c) => c.y === cells[0].y);
+          const sum = line.reduce((a, c) => a + c.width, 0) + cg.layout.gap * (line.length - 1);
+          check("a real grid still wraps, and no line of cells adds up past the width", cg?.layout?.wrap === true && line.length === 3 && sum <= cg.width + 1e-9, JSON.stringify({ wrap: cg?.layout?.wrap, n: line.length, sum, w: cg?.width }));
+        }
+        {
+          const col = L("Tilt column");
+          const slot = col?.children?.[0];
+          const inner = slot?.children?.[0];
+          check(
+            "a tilted layer in auto-layout keeps its CSS slot: an upright frame, the tilt inside",
+            !!col?.layout && slot?.rotation === 0 && slot.width === 240 && slot.height === 240 && inner?.rotation === -2 && inner.x === 0 && inner.y === 0 && col.children[1].y === 250,
+            JSON.stringify({ slot: slot && [slot.rotation, slot.width, slot.height], inner: inner && [inner.rotation, inner.x, inner.y], facts: col?.children?.[1]?.y }),
+          );
+        }
+        {
+          const pc = L("Page column");
+          const main = L("Page main");
+          const foot = L("Page footer");
+          check(
+            "a gap too narrow for a spacer goes into the transparent neighbour, and the footer stays put",
+            pc?.layout?.gap === 64 && !pc.children.some((c) => c.name === "Spacer") && main?.height === 132 && main.y === 94 && foot?.y === 290,
+            JSON.stringify({ gap: pc?.layout?.gap, kids: pc?.children?.map((c) => [c.name, c.y, c.height]) }),
+          );
+        }
+        {
+          const al = L("Accent list");
+          check(
+            "an accent strip's width moves into the padding on its side; the stroke keeps the rest",
+            al?.layout?.padding?.left === 10 && al.layout.padding.top === 6 && al.border.weights.left === 0 && L("Accent row")?.x === 10,
+            JSON.stringify({ pad: al?.layout?.padding, w: al?.border?.weights, row: L("Accent row")?.x }),
+          );
+        }
         const tight = (function f(n) { return n.kind === "TEXT" && n.text.characters.startsWith("Tight leading") ? n : (n.children || []).map(f).find(Boolean) || null; })(lc.root);
         check("a wrapped paragraph whose glyph boxes overlap the next line (tight leading) is still wrapped", tight?.text?.singleLine === false, JSON.stringify(tight && { single: tight.text.singleLine, h: tight.height }));
         check("preconnect links are not reported as missing stylesheets", lc.missingStylesheets.length === 0, JSON.stringify(lc.missingStylesheets));

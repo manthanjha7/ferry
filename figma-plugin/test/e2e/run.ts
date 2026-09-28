@@ -4406,6 +4406,8 @@ async function scenarioX(ready: boolean): Promise<void> {
     `${p} a baseline-aligned row is BASELINE in Figma, not CENTER`,
     `${p} a fixed-width text keeps its width instead of hugging its words`,
     `${p} a spacer child fills the row`,
+    `${p} one line ending in a space keeps its measured width (Figma's auto width drops the space)`,
+    `${p} a bordered auto-layout frame includes its strokes in layout, as CSS border-box does`,
   ];
   if (!ready) {
     for (const n of names) skip(n, "captured/fixture-screen.json not found");
@@ -4422,10 +4424,14 @@ async function scenarioX(ready: boolean): Promise<void> {
   const spacer: IRNode = { ...plain, kind: "FRAME", name: "Spacer", x: 26, y: 0, width: 100, height: 1,
     sizing: { horizontal: "FILL", vertical: "FIXED" }, grow: true, children: [] } as IRNode;
   const row: IRNode = { ...plain, kind: "FRAME", name: "Row", x: 0, y: 0, width: 300, height: 20,
+    border: { weights: { top: 1, right: 1, bottom: 1, left: 1 }, paint: { type: "SOLID", color: { r: 0, g: 0, b: 0, a: 1 } }, dashed: false },
     layout: { mode: "HORIZONTAL", gap: 10, crossGap: 0, wrap: false, padding: { top: 0, right: 0, bottom: 0, left: 0 },
       primaryAlign: "MIN", crossAlign: "BASELINE", source: "explicit-flex" },
     children: [glyph, spacer] } as IRNode;
-  doc.root.children = [row];
+  const lead: IRNode = { ...plain, kind: "TEXT", name: "More about me", x: 0, y: 40, width: 100, height: 20,
+    text: { characters: "More about me ", runs: [{ ...run, end: 14 }], align: "LEFT", verticalAlign: "TOP", singleLine: true },
+    children: [] } as IRNode;
+  doc.root.children = [row, lead];
   const result = await buildDocument(doc, { kind: "none" }, () => {});
   const raw = mock.getRootNodes()[0];
   const find = (node: any, name: string): any => node.name === name ? node : (node.children ?? []).map((c: any) => find(c, name)).find(Boolean) ?? null;
@@ -4435,6 +4441,9 @@ async function scenarioX(ready: boolean): Promise<void> {
   check(names[0], builtRow?.counterAxisAlignItems === "BASELINE", String(builtRow?.counterAxisAlignItems));
   check(names[1], builtGlyph?.textAutoResize === "HEIGHT" && builtGlyph?.width === 16, `${builtGlyph?.textAutoResize} w=${builtGlyph?.width}`);
   check(names[2], builtSpacer?.layoutGrow === 1 || builtSpacer?.layoutSizingHorizontal === "FILL", `${builtSpacer?.layoutGrow} ${builtSpacer?.layoutSizingHorizontal}`);
+  const builtLead = find(raw, "More about me");
+  check(names[3], builtLead?.textAutoResize === "HEIGHT" && builtLead?.width >= 100, `${builtLead?.textAutoResize} w=${builtLead?.width}`);
+  check(names[4], builtRow?.strokesIncludedInLayout === true, String(builtRow?.strokesIncludedInLayout));
   void result;
 }
 

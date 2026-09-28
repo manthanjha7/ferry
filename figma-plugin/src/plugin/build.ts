@@ -977,6 +977,17 @@ async function buildFrame(node: IRNode, ctx: BuildCtx): Promise<FrameNode> {
     frame.paddingRight = layout.padding.right;
     frame.paddingBottom = layout.padding.bottom;
     frame.paddingLeft = layout.padding.left;
+    // A CSS border takes space, a Figma stroke by default does not: content
+    // started under a card's border instead of inside it. Including strokes
+    // in layout is Figma's border-box, and it leaves the padding the
+    // author's own value, so a padding token still binds.
+    if (node.border) {
+      try {
+        frame.strokesIncludedInLayout = true;
+      } catch {
+        // An older Figma: content sits a border's width early.
+      }
+    }
 
     frame.primaryAxisAlignItems = layout.primaryAlign;
     // BASELINE exists for horizontal auto-layout; a vertical one, or an older
@@ -1171,6 +1182,14 @@ async function buildText(node: IRNode, ctx: BuildCtx): Promise<TextNode | null> 
   // One line in the source stays one line, even in a kept-width box: Figma's
   // copy of a face can run a little wider (a 148px Instrument Serif name
   // wrapped onto a second line). The box is the wider of the two.
+  // Figma's auto width drops a trailing space, and the space before an
+  // inline arrow ("More about me " + "↗") is exactly that: the arrow slid
+  // onto the words. Such a line keeps its measured width.
+  if (spec.singleLine && !spec.fixedWidth && !spec.maxLines && /\s$/.test(spec.characters)) {
+    const natural = text.width;
+    text.textAutoResize = "HEIGHT";
+    text.resize(Math.max(node.width, natural, 1), Math.max(node.height, 1));
+  }
   if (spec.singleLine && spec.fixedWidth && !spec.maxLines) {
     text.textAutoResize = "WIDTH_AND_HEIGHT";
     const natural = text.width;

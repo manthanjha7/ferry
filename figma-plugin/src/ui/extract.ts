@@ -2416,10 +2416,27 @@ async function walkMeasured(
   applyChildSizing(children, el, layout);
   if (!layout) orderByStacking(children, sources);
 
+  if (layout) {
+    for (let i = 0; i < children.length; i++) {
+      if (children[i].rotation && !children[i].absolute) children[i] = uprightSlot(children[i]);
+    }
+  }
+
   const border = borders(el, style, ctx);
   const radii = cornerRadii(style);
   // Beneath the content, like the CSS border they stand for.
-  children.unshift(...accentBorders(el, style, border, base, radii, clipsContent(style), ctx));
+  const accents = accentBorders(el, style, border, base, radii, clipsContent(style), ctx);
+  children.unshift(...accents);
+  // The strip took the side off the stroke, so the space it stands for
+  // moves into the padding, where the stroke's width had been.
+  if (layout && border) {
+    for (const strip of accents) {
+      const side = strip.name.split(" ")[0].toLowerCase() as "top" | "right" | "bottom" | "left";
+      const weight = side === "left" || side === "right" ? strip.width : strip.height;
+      layout.padding = { ...layout.padding, [side]: layout.padding[side] + weight };
+      if (layout.paddingTokens) layout.paddingTokens = { ...layout.paddingTokens, [side]: undefined };
+    }
+  }
 
   return {
     kind: "FRAME",
@@ -2939,7 +2956,7 @@ function deriveLayout(
       crossAlign: mapAlign(style.alignItems),
       source: "explicit-flex",
     };
-    return verifyFlexRow(flex, children, el.getBoundingClientRect());
+    return verifyFlexRow(flex, children, el.getBoundingClientRect(), borderInsets(style));
   }
 
   if (style.display === "grid" || style.display === "inline-grid") {
@@ -2960,7 +2977,7 @@ function deriveLayout(
       };
     }
 
-    return {
+    const grid: IRLayout = {
       mode: "HORIZONTAL",
       gap: px(style.columnGap),
       crossGap: px(style.rowGap),
@@ -2970,6 +2987,16 @@ function deriveLayout(
       crossAlign: mapAlign(style.alignItems),
       source: "explicit-grid",
     };
+    // One row of tracks is a row, checked like a flex row. Left wrapping, its
+    // cells measured to the hundredth summed 0.01px past the width
+    // (74 + 891.38 + 138.63 and two gaps in 1160) and Figma wrapped the last
+    // one: a project row's date and arrow dropped under its title.
+    const verified = verifyFlexRow(grid, children, el.getBoundingClientRect(), borderInsets(style));
+    if (verified?.wrap) {
+      // Still a real 2D grid: shave the rounding off so no line overflows.
+      for (const child of children) if (!child.absolute) child.width = Math.max(0, round(child.width - 0.01));
+    }
+    return verified;
   }
 
   if (!ctx.options.inferStacks) return undefined;
@@ -2991,7 +3018,22 @@ function deriveLayout(
  *   - anything else: no auto-layout, exact positions, rather than a wrong one.
  * Wrapping rows are left alone. The approach is Figit's (MIT) layout check.
  */
-function verifyFlexRow(layout: IRLayout, children: IRNode[], box: DOMRect): IRLayout | undefined {
+/** The border's widths: the space a stroke included in layout takes. */
+function borderInsets(style: CSSStyleDeclaration): IRLayout["padding"] {
+  return {
+    top: px(style.borderTopWidth),
+    right: px(style.borderRightWidth),
+    bottom: px(style.borderBottomWidth),
+    left: px(style.borderLeftWidth),
+  };
+}
+
+function verifyFlexRow(
+  layout: IRLayout,
+  children: IRNode[],
+  box: DOMRect,
+  border: IRLayout["padding"] = { top: 0, right: 0, bottom: 0, left: 0 },
+): IRLayout | undefined {
   if (layout.wrap) {
     // A wrapping row that rendered as ONE line is a row: left wrapping, Figma's
     // slightly wider items broke it in two (a header's "+ Add lead" dropped
@@ -3009,8 +3051,12 @@ function verifyFlexRow(layout: IRLayout, children: IRNode[], box: DOMRect): IRLa
   const pos = (n: IRNode) => (horizontal ? n.x : n.y);
   const size = (n: IRNode) => (horizontal ? n.width : n.height);
   const frame = horizontal ? box.width : box.height;
-  const padStart = horizontal ? layout.padding.left : layout.padding.top;
-  const padEnd = horizontal ? layout.padding.right : layout.padding.bottom;
+  // Children sit inside the border too: the builder includes strokes in
+  // layout, so the border is part of where the first child starts.
+  const edgeStart = horizontal ? border.left : border.top;
+  const edgeEnd = horizontal ? border.right : border.bottom;
+  const padStart = (horizontal ? layout.padding.left : layout.padding.top) + edgeStart;
+  const padEnd = (horizontal ? layout.padding.right : layout.padding.bottom) + edgeEnd;
   const inner = frame - padStart - padEnd;
   const sum = flow.reduce((t, n) => t + size(n), 0);
   const TOL = 1.5;
@@ -3032,7 +3078,7 @@ function verifyFlexRow(layout: IRLayout, children: IRNode[], box: DOMRect): IRLa
   const sorted = [...gaps].sort((a, b) => a - b);
   // Lower middle: with two gaps the upper one is the wide gap itself.
   const common = sorted[Math.floor((sorted.length - 1) / 2)];
-  const start = pos(flow[0]);
+  const start = pos(flow[0]) - edgeStart;
   const withPadding = (startPad: number, endPad?: number): IRLayout["padding"] =>
     horizontal
       ? { ...layout.padding, left: startPad, ...(endPad !== undefined ? { right: endPad } : {}) }
@@ -3043,10 +3089,43 @@ function verifyFlexRow(layout: IRLayout, children: IRNode[], box: DOMRect): IRLa
   }
 
   const wide = gaps.map((g, i) => (g > common + 2 ? i : -1)).filter((i) => i >= 0);
+  if (wide.length === 1 && gaps.every((g, i) => i === wide[0] || Math.abs(g - common) <= 1) && gaps[wide[0]] < 2 * common) {
+    // Too narrow for a spacer: one sits between two gaps, so it can only add
+    // space past twice the common gap. A page column at gap 64 whose footer
+    // sat 96px down (a 32px margin on top of the gap) grew a 1px spacer and
+    // 129px of space: every line of the footer landed 33px low. The extra
+    // goes into a neighbour that paints nothing, which a designer can see
+    // and edit as padding.
+    const k = wide[0];
+    const extra = gaps[k] - common;
+    const before = flow[k];
+    const after = flow[k + 1];
+    const setPos = (n: IRNode, v: number) => (horizontal ? (n.x = v) : (n.y = v));
+    const grow = (n: IRNode, by: number) => (horizontal ? (n.width = round(n.width + by)) : (n.height = round(n.height + by)));
+    if (absorbsSpace(before)) {
+      grow(before, extra);
+      if (before.layout) {
+        const pad = before.layout.padding;
+        before.layout = { ...before.layout, padding: horizontal ? { ...pad, right: pad.right + extra } : { ...pad, bottom: pad.bottom + extra } };
+      }
+    } else if (absorbsSpace(after)) {
+      setPos(after, round(pos(after) - extra));
+      grow(after, extra);
+      if (after.layout) {
+        const pad = after.layout.padding;
+        after.layout = { ...after.layout, padding: horizontal ? { ...pad, left: pad.left + extra } : { ...pad, top: pad.top + extra } };
+      } else {
+        for (const c of after.children) setPos(c, round(pos(c) + extra));
+      }
+    } else {
+      return undefined;
+    }
+    return { ...layout, gap: Math.round(common * 100) / 100, primaryAlign: "MIN", padding: withPadding(start), gapToken: undefined };
+  }
   if (wide.length === 1 && gaps.every((g, i) => i === wide[0] || Math.abs(g - common) <= 1)) {
     const k = wide[0];
     const last = flow[flow.length - 1];
-    const endPad = frame - (pos(last) + size(last));
+    const endPad = frame - (pos(last) + size(last)) - edgeEnd;
     const spacer: IRNode = {
       kind: "FRAME",
       name: "Spacer",
@@ -3073,6 +3152,19 @@ function verifyFlexRow(layout: IRLayout, children: IRNode[], box: DOMRect): IRLa
     };
   }
   return undefined;
+}
+
+/** A frame that paints nothing of its own, so growing it at an edge is invisible. */
+function absorbsSpace(n: IRNode): boolean {
+  return (
+    n.kind === "FRAME" &&
+    !n.rotation &&
+    !n.clips &&
+    n.fills.length === 0 &&
+    !n.border &&
+    n.effects.length === 0 &&
+    !(n.sizing && (n.sizing.horizontal === "FILL" || n.sizing.vertical === "FILL"))
+  );
 }
 
 /**
@@ -3206,6 +3298,43 @@ function applyChildSizing(
         ? { horizontal: main, vertical: cross }
         : { horizontal: cross, vertical: main };
     child.grow = main === "FILL";
+  }
+  keepUnequalFillsFixed(children, layout);
+}
+
+/**
+ * Figma shares a row's free space EQUALLY among its FILL children; CSS shares
+ * it by `flex-grow` ratio, on top of each item's `flex-basis`. An FAQ laid out
+ * `flex: 1 1 240px` beside `flex: 2 1 440px` measured 348 and 756 wide, and in
+ * Figma both came out 552: the question list started 171px right and its "+"
+ * icons ran off the page. Growing children on one line that did not measure
+ * the same size are kept at their measured size instead.
+ */
+function keepUnequalFillsFixed(children: IRNode[], layout: IRLayout): void {
+  const horizontal = layout.mode === "HORIZONTAL";
+  const size = (n: IRNode) => (horizontal ? n.width : n.height);
+  const along = (n: IRNode) => (horizontal ? n.y : n.x);
+  const across = (n: IRNode) => (horizontal ? n.height : n.width);
+  const growing = children.filter((c) => c.grow && !c.absolute && c.name !== "Spacer");
+  if (growing.length < 2) return;
+  // One line unless the row wraps; a wrapped line is the children that share
+  // a band on the cross axis.
+  const lines: IRNode[][] = [];
+  for (const child of growing) {
+    const line = layout.wrap
+      ? lines.find((l) => along(child) < along(l[0]) + across(l[0]) && along(l[0]) < along(child) + across(child))
+      : lines[0];
+    if (line) line.push(child);
+    else lines.push([child]);
+  }
+  for (const line of lines) {
+    if (line.length < 2) continue;
+    const sizes = line.map(size);
+    if (Math.max(...sizes) - Math.min(...sizes) <= 1) continue;
+    for (const child of line) {
+      child.grow = false;
+      if (child.sizing) child.sizing = horizontal ? { ...child.sizing, horizontal: "FIXED" } : { ...child.sizing, vertical: "FIXED" };
+    }
   }
 }
 
@@ -3814,6 +3943,34 @@ function borders(
     weights,
     paint: solid(color, ctx, inlineDeclaration(el, "border") ?? inlineDeclaration(el, "border-color")),
     dashed: styleName === "dashed" || styleName === "dotted",
+  };
+}
+
+/**
+ * A tilted layer in auto-layout, inside an upright frame of its CSS box.
+ *
+ * A CSS transform never moves the layout: the box keeps its slot and only its
+ * paint turns. Figma's auto-layout flows a rotated layer by its rotated
+ * bounds, so a portrait tilted 2 degrees pushed the facts list under it 13px
+ * down. The frame holds the slot; the layer turns inside it.
+ */
+function uprightSlot(node: IRNode): IRNode {
+  return {
+    kind: "FRAME",
+    name: node.name,
+    x: node.x,
+    y: node.y,
+    width: node.width,
+    height: node.height,
+    opacity: 1,
+    rotation: 0,
+    clips: false,
+    fills: [],
+    cornerRadius: { tl: 0, tr: 0, br: 0, bl: 0 },
+    effects: [],
+    sizing: node.sizing,
+    grow: node.grow,
+    children: [{ ...node, x: 0, y: 0, sizing: undefined, grow: false }],
   };
 }
 

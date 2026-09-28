@@ -1367,6 +1367,12 @@
       frame.paddingRight = layout.padding.right;
       frame.paddingBottom = layout.padding.bottom;
       frame.paddingLeft = layout.padding.left;
+      if (node.border) {
+        try {
+          frame.strokesIncludedInLayout = true;
+        } catch (e) {
+        }
+      }
       frame.primaryAxisAlignItems = layout.primaryAlign;
       if (layout.crossAlign === "BASELINE" && layout.mode === "HORIZONTAL") {
         try {
@@ -1482,6 +1488,11 @@
     }
     text.resize(Math.max(node.width, 1), Math.max(node.height, 1));
     text.textAutoResize = spec.singleLine && !spec.fixedWidth ? "WIDTH_AND_HEIGHT" : "HEIGHT";
+    if (spec.singleLine && !spec.fixedWidth && !spec.maxLines && /\s$/.test(spec.characters)) {
+      const natural = text.width;
+      text.textAutoResize = "HEIGHT";
+      text.resize(Math.max(node.width, natural, 1), Math.max(node.height, 1));
+    }
     if (spec.singleLine && spec.fixedWidth && !spec.maxLines) {
       text.textAutoResize = "WIDTH_AND_HEIGHT";
       const natural = text.width;

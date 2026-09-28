@@ -27,7 +27,7 @@ def walk(n, ox=0, oy=0, top=False):
     entry = {"x": round(bx, 1), "y": round(by, 1), "w": round(bw, 1), "h": round(bh, 1), "type": n["type"], "align": n.get("align", "LEFT")}
     figma.setdefault(n["name"], []).append(entry)
     if n["type"] == "TEXT":
-        chars = " ".join(n.get("characters", "").split()).lower()
+        chars = " ".join(n.get("characters", "").replace("\ufe0e", "").replace("\ufe0f", "").split()).lower()
         figma.setdefault("text:" + chars, []).append(entry)
         texts.append(dict(entry, chars=chars))
     for c in n.get("children", []):
