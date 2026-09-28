@@ -160,12 +160,20 @@ const drop = () => run(`(async () => {
   return true;
 })()`);
 const importReady = `(() => { const b = document.getElementById("cd2f-import"); return !!b && !b.disabled; })()`;
-await drop();
-try {
-  await until(importReady, 15000, "the Import button");
-} catch {
-  await drop();
+if (process.env.FROM_CLAUDE) {
+  // The design Claude sent through Ferry Link: wait for it under "From
+  // Claude", and open it the way a user does, with a click.
+  await until(`!!document.querySelector("[data-link-id]")`, 60000, "the design under From Claude");
+  await run(`document.querySelector("[data-link-id]").click(), true`);
   await until(importReady, 60000, "the Import button");
+} else {
+  await drop();
+  try {
+    await until(importReady, 15000, "the Import button");
+  } catch {
+    await drop();
+    await until(importReady, 60000, "the Import button");
+  }
 }
 await run(`(() => {
   const radios = Array.from(document.querySelectorAll("#cd2f-token-mode input[type=radio]"));

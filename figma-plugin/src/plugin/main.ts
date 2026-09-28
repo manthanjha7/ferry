@@ -26,6 +26,26 @@ const DESIGN_SYSTEM_STORAGE_KEY = "designSystemCss";
 const MAX_STORED_DESIGN_SYSTEM_BYTES = 500_000;
 
 loadStoredDesignSystem();
+loadLinkCode();
+
+/**
+ * The code this panel pairs with Ferry Link under ("pair Ferry 1234-5678"),
+ * made once per user and kept, so pairing is a one-time step.
+ */
+async function loadLinkCode(): Promise<void> {
+  const KEY = "ferry.link.code";
+  try {
+    let code = (await figma.clientStorage.getAsync(KEY)) as string | undefined;
+    if (typeof code !== "string" || !/^\d{4}-\d{4}$/.test(code)) {
+      const digits = Array.from({ length: 8 }, () => Math.floor(Math.random() * 10)).join("");
+      code = `${digits.slice(0, 4)}-${digits.slice(4)}`;
+      await figma.clientStorage.setAsync(KEY, code);
+    }
+    post({ type: "link-code", code });
+  } catch {
+    // No storage: the panel still imports dropped files.
+  }
+}
 
 async function loadStoredDesignSystem(): Promise<void> {
   try {

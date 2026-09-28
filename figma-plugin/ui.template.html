@@ -543,6 +543,49 @@
 
       /* --- dropzone ------------------------------------------------------ */
 
+      body > #cd2f-app .cd2f-claude {
+        border: 1px solid var(--figma-color-border, #e6e6e6);
+        border-radius: 6px;
+        padding: 8px 10px;
+        margin-bottom: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      body > #cd2f-app .cd2f-claude[hidden] {
+        display: none;
+      }
+      body > #cd2f-app .cd2f-claude-title {
+        font-size: 11px;
+        font-weight: 600;
+      }
+      body > #cd2f-app .cd2f-claude-items {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      body > #cd2f-app .cd2f-claude-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 6px 8px;
+        border-radius: 4px;
+        background: var(--figma-color-bg-secondary, #f5f5f5);
+        cursor: pointer;
+        font-size: 11px;
+      }
+      body > #cd2f-app .cd2f-claude-item:hover {
+        background: var(--figma-color-bg-hover, #ededed);
+      }
+      body > #cd2f-app .cd2f-code {
+        font-family: ui-monospace, Menlo, monospace !important;
+        font-size: 11px;
+        padding: 1px 4px;
+        border-radius: 3px;
+        background: var(--figma-color-bg-secondary, #f5f5f5);
+        user-select: all;
+      }
       body > #cd2f-app .cd2f-dropzone {
         display: flex;
         flex-direction: column;
@@ -892,6 +935,16 @@
             same File[] a folder pick produces. Leaving it unsaid sent people
             looking for an unzip step that does not exist.
           -->
+          <!--
+            Designs sent from Claude through Ferry Link (ferry-link/). Hidden
+            until the panel knows which of its states applies; see
+            src/ui/link.ts.
+          -->
+          <div class="cd2f-claude" id="cd2f-claude" hidden>
+            <div class="cd2f-claude-title">From Claude</div>
+            <div class="cd2f-muted" id="cd2f-claude-hint"></div>
+            <div class="cd2f-claude-items" id="cd2f-claude-items"></div>
+          </div>
           <div class="cd2f-dropzone" id="cd2f-dropzone">
             <div class="cd2f-drop-title">Drop your .html file or .zip export</div>
             <div class="cd2f-muted">

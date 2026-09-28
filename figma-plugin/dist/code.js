@@ -2001,6 +2001,20 @@
   var DESIGN_SYSTEM_STORAGE_KEY = "designSystemCss";
   var MAX_STORED_DESIGN_SYSTEM_BYTES = 5e5;
   loadStoredDesignSystem();
+  loadLinkCode();
+  async function loadLinkCode() {
+    const KEY = "ferry.link.code";
+    try {
+      let code = await figma.clientStorage.getAsync(KEY);
+      if (typeof code !== "string" || !/^\d{4}-\d{4}$/.test(code)) {
+        const digits = Array.from({ length: 8 }, () => Math.floor(Math.random() * 10)).join("");
+        code = `${digits.slice(0, 4)}-${digits.slice(4)}`;
+        await figma.clientStorage.setAsync(KEY, code);
+      }
+      post({ type: "link-code", code });
+    } catch (e) {
+    }
+  }
   async function loadStoredDesignSystem() {
     try {
       const stored = await figma.clientStorage.getAsync(

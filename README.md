@@ -9,6 +9,11 @@ Runs locally inside Figma. No server, no account. Its only network access is the
 > Not affiliated with Anthropic or Figma. "Claude Design" is used only to
 > describe what this imports.
 
+
+## Send straight from Claude (Ferry Link)
+
+Tell Claude "send my Portfolio to Figma" and the design appears in the Ferry panel, ready to import; no zip to download. Set it up once from Claude Code: see [`ferry-link/README.md`](ferry-link/README.md).
+
 ## The problem
 
 The workflow today is:

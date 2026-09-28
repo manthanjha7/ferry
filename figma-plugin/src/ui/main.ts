@@ -18,6 +18,7 @@ import type {
   VariableTarget,
 } from "../ir";
 import { adopt, extractor, resetExtractor } from "./realm";
+import { startLink } from "./link";
 import { describeError, messageOf } from "../errors";
 import {
   BATCH_LIMIT,
@@ -375,7 +376,7 @@ folderInput.addEventListener("change", async () => {
  * before a single screen is measured (`prepareScreen` does that, per screen,
  * inside the import loop).
  */
-async function acceptFileSet(files: File[]): Promise<void> {
+async function acceptFileSet(files: File[], preferPage?: string): Promise<void> {
   const zipFiles = files.filter((file) => file.name.toLowerCase().endsWith(".zip"));
 
   if (zipFiles.length > 0) {
@@ -398,6 +399,13 @@ async function acceptFileSet(files: File[]): Promise<void> {
   pendingFiles = files;
   pendingScreens = screens;
   selection = defaultSelection(screens.length);
+  // A design sent from Claude names the page the user asked for; the rest of
+  // the project stays one pick away in the screen menu.
+  if (preferPage) {
+    const want = preferPage.split("/").pop()!.toLowerCase();
+    const index = screens.findIndex((screen) => (screen.file?.name ?? screen.label).toLowerCase() === want || screen.label.toLowerCase() === want.replace(/\.(dc\.)?html?$/, ""));
+    if (index >= 0) selection = index;
+  }
 
   const assets = files.filter((file) => !screens.some((screen) => screen.file === file));
   pendingModuleSources = await collectModuleSources(assets);
@@ -664,9 +672,9 @@ fileInput.addEventListener("change", async () => {
 });
 
 /** The drop and the picker, with nowhere for a failure to go unreported. */
-async function acceptFiles(files: File[]): Promise<void> {
+async function acceptFiles(files: File[], preferPage?: string): Promise<void> {
   try {
-    await acceptFileSet(files);
+    await acceptFileSet(files, preferPage);
   } catch (error) {
     setStatus("error", describeError(error));
     updateButton();
@@ -1826,6 +1834,18 @@ window.onmessage = (event: MessageEvent) => {
     // Sent once at startup, only when a design system was saved on a
     // previous import — hydrates `designSystemCss` so it applies to this
     // import automatically, with no re-pick required.
+    case "link-code":
+      startLink(
+        {
+          box: el<HTMLDivElement>("cd2f-claude"),
+          hint: el<HTMLDivElement>("cd2f-claude-hint"),
+          list: el<HTMLDivElement>("cd2f-claude-items"),
+          open: (file, item) => acceptFiles([file], item.page),
+        },
+        message.code,
+      );
+      break;
+
     case "design-system-loaded":
       designSystemCss = message.stored.css;
       dsFileCount = message.stored.fileCount;

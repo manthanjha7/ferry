@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "ferry-link": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/server.mjs"]
+    },
+    "claude-design": {
+      "type": "http",
+      "url": "https://api.anthropic.com/v1/design/mcp"
+    }
+  }
+}

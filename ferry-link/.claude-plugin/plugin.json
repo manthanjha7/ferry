@@ -1,0 +1,9 @@
+{
+  "name": "ferry-link",
+  "version": "0.1.0",
+  "description": "Send Claude Design projects straight into Figma as editable layers, through the Ferry plugin. Nothing leaves your machine.",
+  "author": { "name": "Manthan Jha" },
+  "homepage": "https://github.com/manthanjha7/ferry",
+  "license": "MIT",
+  "keywords": ["figma", "claude-design", "design", "ferry"]
+}

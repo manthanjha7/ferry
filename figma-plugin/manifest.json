@@ -13,9 +13,10 @@
   "networkAccess": {
     "allowedDomains": [
       "https://fonts.googleapis.com",
-      "https://fonts.gstatic.com"
+      "https://fonts.gstatic.com",
+      "http://localhost:47841"
     ],
-    "reasoning": "Only to load the Google Fonts a design itself links, so its text is measured in the font it was designed in. Nothing about the design is sent anywhere: files are read locally and inlined, and no other request is made."
+    "reasoning": "Google Fonts: only to load the fonts a design itself links, so its text is measured in the font it was designed in. localhost:47841: to receive designs the user sends from Claude through Ferry Link, a helper running on the same computer; the panel only reads from it after the user pairs it. Nothing about the design is sent anywhere."
   },
   "permissions": [
     "teamlibrary"

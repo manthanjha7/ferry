@@ -776,6 +776,8 @@ export type PluginMessage =
   | { type: "import-failed"; message: string }
   /** Sent once at startup only when a design system was previously saved. */
   | { type: "design-system-loaded"; stored: StoredDesignSystem }
+  /** This panel's Ferry Link pairing code, kept per user in clientStorage. */
+  | { type: "link-code"; code: string }
   /**
    * Ack for "save-design-system". `ok: false` means clientStorage declined
    * it (over size, or a genuine storage error) — the UI still has the CSS in

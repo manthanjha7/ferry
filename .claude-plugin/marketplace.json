@@ -1,0 +1,12 @@
+{
+  "name": "ferry",
+  "owner": { "name": "Manthan Jha" },
+  "metadata": { "description": "Ferry: Claude Design to Figma." },
+  "plugins": [
+    {
+      "name": "ferry-link",
+      "source": "./ferry-link",
+      "description": "Send Claude Design projects straight into Figma through the Ferry plugin."
+    }
+  ]
+}
