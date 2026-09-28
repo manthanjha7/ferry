@@ -10,7 +10,7 @@ import { join } from "node:path";
 process.env.FERRY_HOME = mkdtempSync(join(tmpdir(), "ferry-home-"));
 process.env.FERRY_LINK_PORT = String(48000 + Math.floor(Math.random() * 1000));
 const { zip } = await import("../lib/zip.mjs");
-const { references, previewBase } = await import("../lib/fetch-project.mjs");
+const { references, previewBase, asExported } = await import("../lib/fetch-project.mjs");
 const inbox = await import("../lib/inbox.mjs");
 const { startHttp, callTool, PORT } = await import("../server.mjs");
 
@@ -40,9 +40,22 @@ const check = (name, ok, detail = "") => {
 
 // References: relative paths followed, absolute and templated ones not.
 {
-  const refs = references("pages/Home.dc.html", `<link href="../_ds/x/styles.css"><img src="uploads/a.png"><script src="https://cdn/x.js"></script><div style="background:url('bg.jpg')"></div><img src="{{ hero }}"><x-import from="./comp.jsx"></x-import><a href="#top">`);
-  const want = ["_ds/x/styles.css", "pages/uploads/a.png", "pages/bg.jpg", "pages/comp.jsx"];
+  const refs = references("pages/Home.dc.html", `<style>@import "theme.css";</style><script type="module">import "./boot.js";</script><link href="../_ds/x/styles.css"><img src="uploads/a.png"><script src="https://cdn/x.js"></script><div style="background:url('bg.jpg')"></div><img src="{{ hero }}"><x-import from="./comp.jsx"></x-import><a href="#top">`);
+  const want = ["_ds/x/styles.css", "pages/uploads/a.png", "pages/bg.jpg", "pages/comp.jsx", "pages/theme.css", "pages/boot.js"];
   check("references are the page's relative files, resolved from its folder", want.every((r) => refs.has(r)) && refs.size === want.length, JSON.stringify([...refs]));
+}
+
+// Script source is not a list of files: nothing in it is followed.
+{
+  const junk = references("app.js", `fetch(new URL(u, document.baseURI)); const s = url(css, i); import b from "b"; x.replace(/[a-z]/i, "$1") || url(\${await toDataURL(abs)})`);
+  check("code that only looks like url( or from is not taken for files", junk.size === 0, JSON.stringify([...junk]));
+}
+
+// A served page loses what the preview server injected, and nothing else.
+{
+  const served = `<!doctype html><html><head>\n<style data-omelette-injected>html{}</style><script data-omelette-injected>(()=>{window.parent.postMessage(1,"*")})();</script>\n<meta charset="utf-8"><script src="x.js"></script></head></html>`;
+  const out = Buffer.from(asExported(Buffer.from(served))).toString("utf8");
+  check("the preview server's injected style and script are stripped, the page's own script kept", !/omelette/.test(out) && /<script src="x.js">/.test(out) && /<meta charset/.test(out), out);
 }
 
 // A preview link is only ever a Claude Design one.

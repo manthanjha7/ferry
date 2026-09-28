@@ -1841,6 +1841,7 @@ window.onmessage = (event: MessageEvent) => {
           hint: el<HTMLDivElement>("cd2f-claude-hint"),
           list: el<HTMLDivElement>("cd2f-claude-items"),
           open: (file, item) => acceptFiles([file], item.page),
+          fail: (text) => setStatus("error", text),
         },
         message.code,
       );

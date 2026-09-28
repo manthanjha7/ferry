@@ -29,12 +29,15 @@ export type LinkOptions = {
   list: HTMLElement;
   /** Open a design as if its zip had been dropped. */
   open: (file: File, item: LinkItem) => Promise<void>;
+  /** Say, in the panel's status line, why a design would not open. */
+  fail: (message: string) => void;
 };
 
 let code: string | null = null;
 let state: State = { kind: "unknown" };
 let timer: number | null = null;
 let opening = false;
+let visibilityHooked = false;
 
 function ago(iso: string): string {
   const s = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000));
@@ -103,6 +106,9 @@ async function openItem(o: LinkOptions, item: LinkItem): Promise<void> {
     await request(`/v1/inbox/${item.id}`, { method: "DELETE" }).catch(() => undefined);
     if (state.kind === "ready") state = { kind: "ready", items: state.items.filter((i) => i.id !== item.id) };
     render(o);
+  } catch (error) {
+    o.fail(error instanceof Error && !/fetch|network|abort/i.test(error.message) ? error.message : "Could not reach Ferry Link. Is Claude still open?");
+    void poll(o);
   } finally {
     opening = false;
   }
@@ -138,4 +144,15 @@ export function startLink(o: LinkOptions, pairingCode: string): void {
     lastPoll = Date.now();
     void poll(o);
   }, POLL_MS);
+  // A hidden page's timers are throttled to once a minute; coming back to
+  // Figma is when a design sent meanwhile has to show, so look right away.
+  if (!visibilityHooked) {
+    visibilityHooked = true;
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible" && !opening) {
+        lastPoll = Date.now();
+        void poll(o);
+      }
+    });
+  }
 }

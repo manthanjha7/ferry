@@ -141,16 +141,19 @@ function text(message, isError = false) {
 
 function panelLine() {
   const seen = inbox.lastPanel();
-  // A panel in front polls every 2s; one behind another window every 15s.
-  const open = seen && Date.now() - Date.parse(seen.at) < 40_000;
-  if (!open) return "No Ferry panel is open right now: in Figma, run Ferry (Plugins → Ferry). The design waits in its inbox for a day.";
-  if (!seen.paired) return "A Ferry panel is open but not paired: it shows a code; tell me 'pair Ferry <code>'.";
-  return "Switch to Figma: it is waiting in the Ferry panel under “From Claude”. Click it, then Import.";
+  // A panel in front checks every 2s; behind another window, a browser can
+  // slow it to once a minute. Past a few minutes, assume it is closed.
+  const open = seen && Date.now() - Date.parse(seen.at) < 3 * 60_000;
+  if (open && !seen.paired) return "A Ferry panel is open but not paired: it shows a code; tell me 'pair Ferry <code>'.";
+  if (open) return "Switch to Figma: it is waiting in the Ferry panel under “From Claude”. Click it, then Import.";
+  return "Open Ferry in Figma (Plugins → Ferry): it is waiting there under “From Claude” for a day.";
 }
 
 export async function callTool(name, args = {}) {
   if (name === "pair_figma") {
-    const code = String(args.code || "").trim().replace(/\s+/g, "");
+    // "1234-5678", "1234 5678" or "12345678": the digits are what matter.
+    const digits = String(args.code || "").replace(/\D/g, "");
+    const code = digits.length === 8 ? `${digits.slice(0, 4)}-${digits.slice(4)}` : "";
     if (!CODE.test(code)) return text("That doesn't look like a Ferry code. The panel shows it as four digits, a dash, four digits.", true);
     inbox.pair(code);
     return text(`Paired. Designs sent to Figma now appear in that Ferry panel.`);
@@ -174,8 +177,7 @@ export async function callTool(name, args = {}) {
     } catch (error) {
       return text(`Could not download the design: ${error.message}`, true);
     }
-    const listed = new Set(files);
-    const missing = fetched.missing.filter((p) => listed.has(p));
+    const missing = fetched.missing;
     if (!fetched.files.some((f) => /\.html?$/i.test(f.path))) return text("The project has no page (.html) to import.", true);
     const bytes = zip(fetched.files);
     const meta = inbox.put(String(args.name || "Claude Design"), bytes, {
@@ -185,6 +187,7 @@ export async function callTool(name, args = {}) {
     const notes = [
       ...(missing.length ? [`${missing.length} file(s) could not be downloaded: ${missing.slice(0, 5).join(", ")}.`] : []),
       ...(fetched.skipped.length ? [`Skipped: ${fetched.skipped.slice(0, 5).join(", ")}.`] : []),
+      ...(fetched.unused.length ? [`Left out ${fetched.unused.length} file(s) the design does not use (things pasted into the Claude Design chat, for example).`] : []),
     ];
     return text(
       [`Sent “${meta.name}” to Figma (${fetched.files.length} files, ${(bytes.length / 1024 / 1024).toFixed(1)} MB).`, panelLine(), ...notes].join("\n"),
