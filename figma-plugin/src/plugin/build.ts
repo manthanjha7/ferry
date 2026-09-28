@@ -281,6 +281,7 @@ export async function buildDocuments(
         warnings.push(docs.length > 1 ? `${doc.name}: ${warning}` : warning);
       }
     } catch (error) {
+      console.error(`[ferry] building "${doc.name}" failed`, error instanceof Error ? error.stack || error.message : error);
       // `buildDocument` already removed its own partial tree. One unbuildable
       // screen out of fourteen is a line in the summary, not a dead import.
       rootByDoc.push(null);
@@ -970,9 +971,18 @@ async function buildFrame(node: IRNode, ctx: BuildCtx): Promise<FrameNode> {
     frame.paddingLeft = layout.padding.left;
 
     frame.primaryAxisAlignItems = layout.primaryAlign;
-    // Figma has no BASELINE on the counter axis; CENTER is the closest read.
-    frame.counterAxisAlignItems =
-      layout.crossAlign === "BASELINE" ? "CENTER" : layout.crossAlign;
+    // BASELINE exists for horizontal auto-layout; a vertical one, or an older
+    // Figma that refuses it, gets CENTER, the closest read. The portfolio's
+    // baseline-aligned nav sat 6px low under CENTER.
+    if (layout.crossAlign === "BASELINE" && layout.mode === "HORIZONTAL") {
+      try {
+        frame.counterAxisAlignItems = "BASELINE";
+      } catch {
+        frame.counterAxisAlignItems = "CENTER";
+      }
+    } else {
+      frame.counterAxisAlignItems = layout.crossAlign === "BASELINE" ? "CENTER" : layout.crossAlign;
+    }
 
     // Keep the frame at its measured size by default: hugging everywhere would
     // let font substitution or a rounding difference resize the whole screen.
@@ -1149,7 +1159,7 @@ async function buildText(node: IRNode, ctx: BuildCtx): Promise<TextNode | null> 
   // onto two lines and overlapping their neighbours. Letting the box grow is
   // the lesser distortion. Genuinely wrapped text keeps its measured width so
   // its line breaks survive.
-  text.textAutoResize = spec.singleLine ? "WIDTH_AND_HEIGHT" : "HEIGHT";
+  text.textAutoResize = spec.singleLine && !spec.fixedWidth ? "WIDTH_AND_HEIGHT" : "HEIGHT";
 
   // Truncated in the source (ellipsis, line-clamp): the box keeps its width and
   // Figma cuts the text itself, instead of the full string spilling out.

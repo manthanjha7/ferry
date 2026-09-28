@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+  <head><meta charset="utf-8" /></head>
+  <body>
+    <x-dc>
+      <div data-name="Count" style="background:#eee">{{ count }}</div>
+    </x-dc>
+    <script type="text/x-dc" data-dc-script>
+      class Component extends DCLogic {
+        state = { count: 0 };
+        componentDidMount() {
+          // A poll-every-frame loop that never changes anything (the scroll
+          // handler idiom), beside a counter that animates for 1s.
+          const poll = () => { document.body.getBoundingClientRect(); requestAnimationFrame(poll); };
+          requestAnimationFrame(poll);
+          const start = performance.now();
+          const step = () => {
+            const p = Math.min(1, (performance.now() - start) / 1000);
+            this.setState({ count: Math.round(500 * p) });
+            if (p < 1) requestAnimationFrame(step);
+          };
+          requestAnimationFrame(step);
+        }
+        renderVals() { return { count: String(this.state.count) }; }
+      }
+    </script>
+  </body>
+</html>

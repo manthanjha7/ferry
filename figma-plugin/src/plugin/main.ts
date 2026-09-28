@@ -175,6 +175,8 @@ async function runImport(
 
     figma.notify(`Imported ${bits.join(", ")}`);
   } catch (error) {
+    // The whole error, stack included, for whoever reads the console.
+    console.error("[ferry] import failed", error instanceof Error ? error.stack || error.message : error);
     post({ type: "import-failed", message: describeError(error) });
     figma.notify("Import failed. See the panel for details.", { error: true });
   }
@@ -188,6 +190,19 @@ async function runImport(
 async function selftest(message: { type: string; scale?: number }): Promise<void> {
   const reply = (payload: Record<string, unknown>) => figma.ui.postMessage({ selftest: true, ...payload });
   try {
+    if (message.type === "selftest-fonts") {
+      const t0 = Date.now();
+      const list = await figma.listAvailableFontsAsync();
+      const t1 = Date.now();
+      const loads: Record<string, string> = {};
+      for (const fam of ["Inter", "Roboto", "Geist", "Newsreader", "Hind"]) {
+        const s0 = Date.now();
+        try { await figma.loadFontAsync({ family: fam, style: "Regular" }); loads[fam] = `${Date.now() - s0}ms`; }
+        catch (e) { loads[fam] = `${Date.now() - s0}ms ${String((e as Error).message).slice(0, 80)}`; }
+      }
+      reply({ type: "selftest-fonts", list: list.length, listMs: t1 - t0, loads });
+      return;
+    }
     if (message.type === "selftest-clear") {
       for (const node of [...figma.currentPage.children]) node.remove();
       reply({ type: "selftest-cleared" });

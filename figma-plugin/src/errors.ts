@@ -13,6 +13,9 @@ export function describeError(error: unknown): string {
     error instanceof Error ? error.message : typeof error === "string" ? error : "";
   const detail = raw.replace(/\s+/g, " ").trim().slice(0, 160);
   const suffix = detail ? ` (${detail})` : "";
+  if (/establish connection|internet connection|network|timed out/i.test(detail)) {
+    return "Figma could not reach its servers in time (it loads fonts from them). Check your connection and import again.";
+  }
   if (/font/i.test(detail)) {
     return `A font this document uses could not be loaded in Figma${suffix}.`;
   }

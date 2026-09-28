@@ -13,7 +13,9 @@ for (const c of contexts) {
   try { await evaluate(cdp, sessionId, "document.getElementById('cd2f-close') ? (document.getElementById('cd2f-close').click(), true) : false", { contextId: c.id, timeout: 2000 }); } catch {}
 }
 await sleep(1500);
-await evaluate(cdp, sessionId, "document.querySelector('canvas')?.focus(); true");
+// Figma's own popups ("New tools, woven right in") steal the keyboard.
+  await evaluate(cdp, sessionId, "Array.from(document.querySelectorAll('button[aria-label=Close], button[aria-label=close]')).filter(b => b.closest('[role=dialog], [class*=popover], [class*=onboarding], [class*=modal]')).forEach(b => b.click()); document.querySelector('canvas')?.focus(); true");
+  await press(cdp, sessionId, "Escape");
 await press(cdp, sessionId, "Slash", 4);
 await sleep(900);
 await typeText(cdp, sessionId, "Ferry");

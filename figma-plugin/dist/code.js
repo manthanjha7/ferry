@@ -57,9 +57,30 @@
     cursive: ["Inter"]
   };
   var LAST_RESORT = ["Inter", "Roboto", "Arial", "Helvetica"];
+  var FONT_LOAD_TIMEOUT_MS = 2e4;
+  function withTimeout(promise, ms) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("font load timed out")), ms);
+      promise.then(
+        (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        (error) => {
+          clearTimeout(timer);
+          reject(error);
+        }
+      );
+    });
+  }
   async function createFontResolver(requests) {
     var _a;
-    const available = await figma.listAvailableFontsAsync();
+    let available;
+    try {
+      available = await figma.listAvailableFontsAsync();
+    } catch (e) {
+      available = await figma.listAvailableFontsAsync();
+    }
     const families = /* @__PURE__ */ new Map();
     for (const font of available) {
       const key = font.fontName.family.toLowerCase();
@@ -122,7 +143,7 @@
     await Promise.all(
       Array.from(needed.values()).map(async (font) => {
         try {
-          await figma.loadFontAsync(font);
+          await withTimeout(figma.loadFontAsync(font), FONT_LOAD_TIMEOUT_MS);
         } catch (e) {
           failed.add(`${font.family}|${font.style}`);
           substitutions.add(`${font.family} ${font.style} \u2192 Inter (could not load)`);
@@ -130,7 +151,7 @@
       })
     );
     try {
-      await figma.loadFontAsync({ family: "Inter", style: "Regular" });
+      await withTimeout(figma.loadFontAsync({ family: "Inter", style: "Regular" }), FONT_LOAD_TIMEOUT_MS);
     } catch (e) {
     }
     const safeResolve = (family, weight, italic) => {
@@ -178,6 +199,9 @@
     const raw = error instanceof Error ? error.message : typeof error === "string" ? error : "";
     const detail = raw.replace(/\s+/g, " ").trim().slice(0, 160);
     const suffix = detail ? ` (${detail})` : "";
+    if (/establish connection|internet connection|network|timed out/i.test(detail)) {
+      return "Figma could not reach its servers in time (it loads fonts from them). Check your connection and import again.";
+    }
     if (/font/i.test(detail)) {
       return `A font this document uses could not be loaded in Figma${suffix}.`;
     }
@@ -1000,6 +1024,7 @@
           warnings.push(docs.length > 1 ? `${doc.name}: ${warning}` : warning);
         }
       } catch (error) {
+        console.error(`[ferry] building "${doc.name}" failed`, error instanceof Error ? error.stack || error.message : error);
         rootByDoc.push(null);
         perDocument.push({
           name: doc.name,
@@ -1340,7 +1365,15 @@
       frame.paddingBottom = layout.padding.bottom;
       frame.paddingLeft = layout.padding.left;
       frame.primaryAxisAlignItems = layout.primaryAlign;
-      frame.counterAxisAlignItems = layout.crossAlign === "BASELINE" ? "CENTER" : layout.crossAlign;
+      if (layout.crossAlign === "BASELINE" && layout.mode === "HORIZONTAL") {
+        try {
+          frame.counterAxisAlignItems = "BASELINE";
+        } catch (e) {
+          frame.counterAxisAlignItems = "CENTER";
+        }
+      } else {
+        frame.counterAxisAlignItems = layout.crossAlign === "BASELINE" ? "CENTER" : layout.crossAlign;
+      }
       if (layout.hugContent) {
         frame.primaryAxisSizingMode = "AUTO";
         frame.counterAxisSizingMode = "AUTO";
@@ -1445,7 +1478,7 @@
       applyRun(text, start, end, run, ctx);
     }
     text.resize(Math.max(node.width, 1), Math.max(node.height, 1));
-    text.textAutoResize = spec.singleLine ? "WIDTH_AND_HEIGHT" : "HEIGHT";
+    text.textAutoResize = spec.singleLine && !spec.fixedWidth ? "WIDTH_AND_HEIGHT" : "HEIGHT";
     if (spec.maxLines) {
       try {
         text.textAutoResize = "HEIGHT";
@@ -1814,6 +1847,7 @@
       if (failed > 0) bits.push(`${failed} skipped`);
       figma.notify(`Imported ${bits.join(", ")}`);
     } catch (error) {
+      console.error("[ferry] import failed", error instanceof Error ? error.stack || error.message : error);
       post({ type: "import-failed", message: describeError(error) });
       figma.notify("Import failed. See the panel for details.", { error: true });
     }

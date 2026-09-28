@@ -4400,6 +4400,44 @@ async function scenarioS(ready: boolean): Promise<void> {
  * in for the real capture, which is gitignored, so the builder side of the fix
  * is exercised on every run rather than only when a real export is on disk.
  */
+async function scenarioX(ready: boolean): Promise<void> {
+  const p = "X (layout fixes from real-Figma runs):";
+  const names = [
+    `${p} a baseline-aligned row is BASELINE in Figma, not CENTER`,
+    `${p} a fixed-width text keeps its width instead of hugging its words`,
+    `${p} a spacer child fills the row`,
+  ];
+  if (!ready) {
+    for (const n of names) skip(n, "captured/fixture-screen.json not found");
+    return;
+  }
+  const mock = freshMock();
+  const doc = selectFieldDoc();
+  const run = { ...doc.root.children[0].children[0].text!.runs[0] };
+  const plain = { opacity: 1, rotation: 0, clips: false, cornerRadius: { tl: 0, tr: 0, br: 0, bl: 0 }, effects: [], fills: [] };
+  const glyph: IRNode = { ...plain, kind: "TEXT", name: "\u25E7", x: 0, y: 0, width: 16, height: 20,
+    sizing: { horizontal: "FIXED", vertical: "FIXED" },
+    text: { characters: "\u25E7", runs: [{ ...run, end: 1 }], align: "CENTER", verticalAlign: "TOP", singleLine: true, fixedWidth: true },
+    children: [] } as IRNode;
+  const spacer: IRNode = { ...plain, kind: "FRAME", name: "Spacer", x: 26, y: 0, width: 100, height: 1,
+    sizing: { horizontal: "FILL", vertical: "FIXED" }, grow: true, children: [] } as IRNode;
+  const row: IRNode = { ...plain, kind: "FRAME", name: "Row", x: 0, y: 0, width: 300, height: 20,
+    layout: { mode: "HORIZONTAL", gap: 10, crossGap: 0, wrap: false, padding: { top: 0, right: 0, bottom: 0, left: 0 },
+      primaryAlign: "MIN", crossAlign: "BASELINE", source: "explicit-flex" },
+    children: [glyph, spacer] } as IRNode;
+  doc.root.children = [row];
+  const result = await buildDocument(doc, { kind: "none" }, () => {});
+  const raw = mock.getRootNodes()[0];
+  const find = (node: any, name: string): any => node.name === name ? node : (node.children ?? []).map((c: any) => find(c, name)).find(Boolean) ?? null;
+  const builtRow = find(raw, "Row");
+  const builtGlyph = find(raw, "\u25E7");
+  const builtSpacer = find(raw, "Spacer");
+  check(names[0], builtRow?.counterAxisAlignItems === "BASELINE", String(builtRow?.counterAxisAlignItems));
+  check(names[1], builtGlyph?.textAutoResize === "HEIGHT" && builtGlyph?.width === 16, `${builtGlyph?.textAutoResize} w=${builtGlyph?.width}`);
+  check(names[2], builtSpacer?.layoutGrow === 1 || builtSpacer?.layoutSizingHorizontal === "FILL", `${builtSpacer?.layoutGrow} ${builtSpacer?.layoutSizingHorizontal}`);
+  void result;
+}
+
 async function scenarioW(ready: boolean): Promise<void> {
   const p = "W (animation scenes play themselves):";
   const names = [
@@ -4843,6 +4881,11 @@ async function main(): Promise<void> {
     await scenarioW(fixtureReady);
   } catch (err) {
     failScenario("W", err);
+  }
+  try {
+    await scenarioX(fixtureReady);
+  } catch (err) {
+    failScenario("X", err);
   }
 
   if (scenarioAOut) {

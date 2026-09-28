@@ -1204,6 +1204,72 @@
           `circles=${(chart?.svg.match(/<circle/g) || []).length} loops=${svgLoop.dynamicContent.loops}`,
         );
 
+        // --- Found in real Figma (test/fixture/layout-check.html) -------------
+        {
+        const lc = await window.extractDocument(await (await fetch("layout-check.html")).text(), "Layout", { viewportWidth: 1440 });
+        const L = (n) => findByName(lc.root, n);
+        const tab = L("Tab bar");
+        check(
+          "margin-left:auto in a flex row becomes a FILL spacer, not a lost push",
+          tab?.layout?.mode === "HORIZONTAL" &&
+            tab.children.some((c) => c.name === "Spacer" && c.sizing?.horizontal === "FILL") &&
+            tab.children[tab.children.length - 1].text?.characters === "Fri 23 Oct",
+          JSON.stringify(tab?.children?.map((c) => [c.name, c.sizing?.horizontal])),
+        );
+        const even = L("Even row");
+        check(
+          "space-evenly is rebuilt from what was measured (one common gap and the start), not dropped to MIN",
+          // 600px, three 60px items: 420px shared by four spaces, 105 each.
+          even?.layout?.primaryAlign === "MIN" && Math.abs(even.layout.gap - 105) <= 1.5 && Math.abs(even.layout.padding.left - 105) <= 1.5,
+          JSON.stringify({ gap: even?.layout?.gap, pad: even?.layout?.padding, align: even?.layout?.primaryAlign }),
+        );
+        check(
+          "an absolutely placed badge inside a flex row is pinned out of flow",
+          L("Badge")?.absolute === true && !!L("Card")?.layout,
+          JSON.stringify({ badge: L("Badge")?.absolute, card: L("Card")?.layout?.mode }),
+        );
+        const navItem = L("Nav item");
+        const glyph = navItem?.children?.find((c) => c.kind === "TEXT" && c.text.characters === "\u25E7");
+        check(
+          "an icon glyph in a fixed 16px column keeps its column width",
+          glyph?.text?.fixedWidth === true && glyph.width === 16,
+          JSON.stringify({ w: glyph?.width, fixed: glyph?.text?.fixedWidth }),
+        );
+        const centred = (function f(n) { return n.kind === "TEXT" && n.text.characters === "Centred copy" ? n : (n.children || []).map(f).find(Boolean) || null; })(lc.root);
+        check("centred copy keeps its box so it stays centred", centred?.text?.fixedWidth === true && centred.width === 400, JSON.stringify({ w: centred?.width }));
+        const mixed = (function f(n) { return n.kind === "TEXT" && n.text.characters.startsWith("I turn") ? n : (n.children || []).map(f).find(Boolean) || null; })(lc.root);
+        const runLH = mixed?.text?.runs?.[0]?.lineHeight;
+        check(
+          "mixed-font lines keep their rendered height: line height is raised to match the box",
+          !!mixed && Math.abs(runLH * Math.round(mixed.height / runLH) - mixed.height) <= 1 && runLH >= 78,
+          JSON.stringify({ h: mixed?.height, lh: runLH }),
+        );
+        const arrow = L("Arrow link");
+        const lead = arrow?.children?.find((c) => c.kind === "TEXT");
+        check("the space before an inline arrow survives (\"work \u2193\", not \"work\u2193\")", lead?.text?.characters === "Explore my work ", JSON.stringify(lead?.text?.characters));
+        check("a page frame is the design width and at least one screen tall", lc.root.width === 1440 && lc.root.height >= 900, `${lc.root.width}x${lc.root.height}`);
+        {
+          const plain = await window.extractDocument("<!DOCTYPE html><html><body><div data-name='Box' style='width:50px;height:50px;background:#000'></div></body></html>", "Plain", { viewportWidth: 400 });
+          const dc = await window.extractDocument("<!DOCTYPE html><html><body><x-dc><div data-name='Box' style='width:50px;height:50px;background:#000'></div></x-dc></body></html>", "DC", { viewportWidth: 400 });
+          check(
+            "plain HTML keeps the browser's 8px body margin; a Claude Design document starts at 0 like its runtime",
+            findByName(plain.root, "Box")?.x === 8 && findByName(dc.root, "Box")?.x === 0,
+            `plain=${findByName(plain.root, "Box")?.x} dc=${findByName(dc.root, "Box")?.x}`,
+          );
+        }
+        {
+          const t0 = performance.now();
+          const idle = await window.extractDocument(await (await fetch("idle-loop.dc.html")).text(), "Idle", { viewportWidth: 400 });
+          const took = performance.now() - t0;
+          const count = (function f(n) { return n.kind === "TEXT" ? n : (n.children || []).map(f).find(Boolean) || null; })(findByName(idle.root, "Count"));
+          check(
+            "a frame loop that polls forever is dropped once idle, while a counter still finishes",
+            count?.text?.characters === "500" && took < 8000,
+            `count=${count?.text?.characters} took=${Math.round(took)}ms`,
+          );
+        }
+        }
+
         // --- Two screens of one export that disagree (divergent-a/b.html) ------
         // The premise the sandbox half of this story rests on, measured rather
         // than assumed: two Claude Design documents can declare one token name

@@ -41,6 +41,20 @@ const SLOW_INTERVAL_MS = 1000;
 /** Callbacks one `advance` may run, so a runaway loop cannot hang the import. */
 const MAX_STEPS = 6000;
 const FRAME_MS = 1000 / 60;
+/**
+ * Animation frames in a row that changed nothing before the frame loop counts
+ * as idle. A page that polls scroll position every frame forever (the
+ * portfolio's reveal loop) ran 720 frames of layout for nothing: 89 of a
+ * 91-second import. A counter or typewriter changes something every frame, so
+ * it runs to its end.
+ */
+const IDLE_FRAMES = 30;
+
+/** Bumped by the resolver on every document setState: state changes are activity too. */
+let activity = 0;
+export function noteActivity(): void {
+  activity++;
+}
 
 type Entry = {
   id: number;
@@ -48,6 +62,7 @@ type Entry = {
   due: number;
   run: () => void;
   period?: number;
+  frame?: boolean;
 };
 
 export type VirtualClock = {
@@ -83,6 +98,9 @@ export function installVirtualClock(): VirtualClock {
   let kicked = false;
   let installed = true;
   const queue = new Map<number, Entry>();
+  const mutations = new MutationObserver(() => {});
+  mutations.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
+  let idleFrames = 0;
 
   const add = (entry: Omit<Entry, "id" | "seq">): number => {
     const id = nextId++;
@@ -111,10 +129,20 @@ export function installVirtualClock(): VirtualClock {
         const period = next.period;
         queue.set(next.id, { ...next, due: vt + period, seq: seq++ });
       }
+      const before = activity;
+      mutations.takeRecords();
       try {
         next.run();
       } catch {
         // The document's own error; its other timers still run.
+      }
+      const changed = activity !== before || mutations.takeRecords().length > 0;
+      if (!next.frame) idleFrames = 0;
+      else if (changed) idleFrames = 0;
+      else if (++idleFrames >= IDLE_FRAMES) {
+        // The frame loop is polling, not animating: stop pumping it.
+        for (const [id, entry] of queue) if (entry.frame) queue.delete(id);
+        idleFrames = 0;
       }
     }
   };
@@ -142,7 +170,7 @@ export function installVirtualClock(): VirtualClock {
     // place for the whole step budget.
     let due = (Math.floor((vt + 1e-6) / FRAME_MS) + 1) * FRAME_MS;
     if (due <= vt) due = vt + FRAME_MS;
-    return add({ due, run: () => cb(startPerf + vt) });
+    return add({ due, run: () => cb(startPerf + vt), frame: true });
   }) as typeof window.requestAnimationFrame;
   window.cancelAnimationFrame = ((id: number) => {
     queue.delete(id);
@@ -159,6 +187,7 @@ export function installVirtualClock(): VirtualClock {
       if (!installed) return;
       installed = false;
       queue.clear();
+      mutations.disconnect();
       window.setTimeout = originals.setTimeout;
       window.clearTimeout = originals.clearTimeout;
       window.setInterval = originals.setInterval;

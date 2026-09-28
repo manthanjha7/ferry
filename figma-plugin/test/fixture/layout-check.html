@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Layout checks from real-Figma runs</title>
+    <style>
+      body { margin: 0; font: 14px/20px sans-serif; }
+      .bar { display: flex; align-items: center; gap: 8px; width: 600px; padding: 0 16px; height: 40px; background: #eee; }
+      .push { margin-left: auto; }
+      .even { display: flex; justify-content: space-evenly; width: 600px; }
+      .even span { width: 60px; height: 20px; background: #0cf; }
+      .card { position: relative; display: flex; gap: 8px; width: 300px; padding: 8px; background: #fafafa; }
+      .badge { position: absolute; top: -6px; right: -6px; width: 12px; height: 12px; background: red; border-radius: 50%; }
+      .nav { display: flex; flex-direction: column; width: 200px; }
+      .item { display: flex; align-items: center; gap: 10px; }
+      .icon { width: 16px; text-align: center; }
+      .centred { width: 400px; text-align: center; }
+      .mixed { width: 900px; font-size: 72px; line-height: 1.085; margin: 0; }
+      .mixed em { font-family: Georgia, serif; }
+      .arrowlink span { display: inline-block; }
+    </style>
+  </head>
+  <body>
+    <div data-name="Tab bar" class="bar"><span>This week</span><span>Project</span><span data-name="Date" class="push">Fri 23 Oct</span></div>
+    <div data-name="Even row" class="even"><span></span><span></span><span></span></div>
+    <div data-name="Card" class="card"><span>Leads</span><span>41</span><i data-name="Badge" class="badge"></i></div>
+    <div data-name="Nav" class="nav"><div data-name="Nav item" class="item"><span class="icon">◧</span><span>This week</span></div></div>
+    <p data-name="Centred" class="centred">Centred copy</p>
+    <h1 data-name="Mixed" class="mixed">I turn messy problems into <em>useful</em> products.</h1>
+    <a data-name="Arrow link" class="arrowlink">Explore my work <span>↓</span></a>
+  </body>
+</html>

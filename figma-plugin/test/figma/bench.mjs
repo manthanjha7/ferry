@@ -10,15 +10,34 @@
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
+import { execFileSync } from "node:child_process";
 import { connectBrowser, evaluate, sleep } from "./cdp.mjs";
 
 const [prefix, zipPath, mode = "none", outDir] = process.argv.slice(2);
 mkdirSync(outDir, { recursive: true });
 
+// A Figma window behind other apps is throttled: the same 35-layer import took
+// 48s there and 2s in front. Keep it in front for the run.
+execFileSync("open", ["-a", "Figma"]);
 const cdp = await connectBrowser();
 const page = (await cdp.send("Target.getTargets")).targetInfos.find((t) => t.targetId.startsWith(prefix));
 const { sessionId } = await cdp.send("Target.attachToTarget", { targetId: page.targetId, flatten: true });
 await cdp.send("Runtime.enable", {}, sessionId);
+// Everything the page and the plugin sandbox say while the case runs.
+const consoleLog = [];
+cdp.on((msg) => {
+  if (msg.sessionId !== sessionId) return;
+  if (msg.method === "Runtime.consoleAPICalled") {
+    consoleLog.push(`${msg.params.type}: ${msg.params.args.map((a) => a.value ?? a.description ?? "").join(" ")}`.slice(0, 600));
+  }
+  if (msg.method === "Runtime.exceptionThrown") {
+    const d = msg.params.exceptionDetails;
+    consoleLog.push(`EXCEPTION: ${(d.exception?.description || d.text || "").slice(0, 800)}`);
+  }
+});
+process.on("exit", () => {
+  try { writeFileSync(join(outDir, "console.txt"), consoleLog.join("\n")); } catch {}
+});
 
 // The build the panel must be running: Figma caches plugin code between runs,
 // so a rebuilt dist is only live once the plugin is closed and run again.
@@ -58,7 +77,9 @@ async function clickText(pattern) {
 
 async function launchFerry() {
   const { press, typeText } = await import("./keys.mjs");
-  await evaluate(cdp, sessionId, "document.querySelector('canvas')?.focus(); true");
+  // Figma's own popups ("New tools, woven right in") steal the keyboard.
+  await evaluate(cdp, sessionId, "Array.from(document.querySelectorAll('button[aria-label=Close], button[aria-label=close]')).filter(b => b.closest('[role=dialog], [class*=popover], [class*=onboarding], [class*=modal]')).forEach(b => b.click()); document.querySelector('canvas')?.focus(); true");
+  await press(cdp, sessionId, "Escape");
   await press(cdp, sessionId, "Slash", 4);
   await sleep(900);
   await typeText(cdp, sessionId, "Ferry");
@@ -83,7 +104,7 @@ if (panel && panel.stamp !== distStamp) {
   await sleep(1500);
   panel = null;
 }
-if (!panel) {
+for (let attempt = 0; !panel && attempt < 3; attempt++) {
   await launchFerry();
   panel = await findPanel();
 }
@@ -151,6 +172,16 @@ const importsBefore = await run(`window.__imports.length`);
 await run(`document.getElementById("cd2f-import").click(), true`);
 // Done is the sandbox saying so, after THIS click: panel text can be a
 // previous case's "Imported." still on screen.
+// A timeline of what the panel says while it works, to see which phase is slow.
+const timeline = [];
+process.on("exit", () => { try { writeFileSync(join(outDir, "timeline.txt"), timeline.join("\n")); } catch {} });
+let lastStatus = "";
+const statusTimer = setInterval(async () => {
+  try {
+    const status = await run(`(document.querySelector(".cd2f-status, #cd2f-status")?.innerText || "").trim().slice(0, 120)`, 3000);
+    if (status && status !== lastStatus) { timeline.push(`${Date.now() - t0}ms ${status}`); lastStatus = status; }
+  } catch {}
+}, 250);
 const outcome = await until(
   `(() => {
     const got = window.__imports.slice(${importsBefore})[0];
@@ -162,6 +193,8 @@ const outcome = await until(
   300000,
   "the import to finish",
 );
+clearInterval(statusTimer);
+writeFileSync(join(outDir, "timeline.txt"), timeline.join("\n"));
 await sleep(500);
 const status = await run(`document.body.innerText`);
 const took = Date.now() - t0;

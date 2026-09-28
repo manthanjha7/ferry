@@ -93,18 +93,19 @@ try {
   // The page's content, not the viewport: a short page is not 900px of white.
   const full = await evalIn(`Math.ceil(Math.max(1, ...Array.from(document.body.querySelectorAll("*")).map((el) => el.getBoundingClientRect().bottom + scrollY)))`);
   // Every named element's box, for a per-element diff against Figma's tree.
-  const boxes = await evalIn(`JSON.stringify(Array.from(document.querySelectorAll("[data-name]")).map((el) => {
+  const boxes = await evalIn(`JSON.stringify(Array.from(document.querySelectorAll("body *")).filter((el) => el.hasAttribute("data-name") || (/^(H[1-6]|P|LI)$/.test(el.tagName) && el.innerText.trim()) || (el.children.length === 0 && el.innerText && el.innerText.trim() && el.getClientRects().length)).slice(0, 800).map((el) => {
     const cs = getComputedStyle(el);
     const hasPseudo = ["::before", "::after"].some((p) => { const c = getComputedStyle(el, p).content; return c && c !== "none" && c !== "normal"; });
     const truncates = cs.textOverflow === "ellipsis" || (cs.webkitLineClamp && cs.webkitLineClamp !== "none");
     const clipsText = /text/.test(cs.backgroundClip || cs.webkitBackgroundClip || "");
     // A plain text leaf becomes a Figma text layer that hugs its words, so its
     // glyph box is what to compare; anything decorated or cut off keeps its box.
-    const leafText = el.children.length === 0 && el.innerText.trim() && cs.backgroundColor === "rgba(0, 0, 0, 0)" &&
+    const block = /^(H[1-6]|P|LI)$/.test(el.tagName) && !el.hasAttribute("data-name");
+    const leafText = !block && el.children.length === 0 && el.innerText.trim() && cs.backgroundColor === "rgba(0, 0, 0, 0)" &&
       cs.backgroundImage === "none" && !hasPseudo && !truncates && !clipsText && cs.borderTopWidth === "0px" && cs.paddingLeft === "0px";
     let r = el.getBoundingClientRect();
     if (leafText) { const range = document.createRange(); range.selectNodeContents(el); r = range.getBoundingClientRect(); }
-    return { name: el.getAttribute("data-name"), text: el.children.length === 0 ? el.innerText.trim() : null, x: Math.round(r.left * 10) / 10, y: Math.round((r.top + scrollY) * 10) / 10, w: Math.round(r.width * 10) / 10, h: Math.round(r.height * 10) / 10 };
+    return { name: el.getAttribute("data-name") || "", kind: block ? "block" : leafText ? "glyph" : "box", text: el.children.length === 0 || block ? el.innerText.trim().replace(/\\s+/g, " ") : null, x: Math.round(r.left * 10) / 10, y: Math.round((r.top + scrollY) * 10) / 10, w: Math.round(r.width * 10) / 10, h: Math.round(r.height * 10) / 10 };
   }))`);
   writeFileSync(out.replace(/\.png$/, ".boxes.json"), boxes);
   // Keep the 900px viewport (so 100vh stays one screen) and capture past it.

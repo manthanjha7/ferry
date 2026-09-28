@@ -49,7 +49,7 @@
  * of resolution.
  */
 
-import { real } from "./clock";
+import { noteActivity, real } from "./clock";
 
 /**
  * Renames `<sc-for>`/`<sc-if>` to `<template data-sc-for>`/`<template
@@ -512,6 +512,7 @@ function createDCLogicStub(
       }
       report.setStateCalls++;
       tracker.lastActivityAt = real.now();
+      noteActivity();
     }
   };
 }

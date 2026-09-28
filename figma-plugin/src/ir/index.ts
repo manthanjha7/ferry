@@ -155,6 +155,11 @@ export type IRText = {
    */
   maxLines?: number;
   /**
+   * The box is wider than its words on purpose (a fixed column, centred or
+   * right-aligned copy), so the text layer keeps the measured width.
+   */
+  fixedWidth?: boolean;
+  /**
    * A paint for the glyphs themselves, from `background-clip: text` (gradient
    * text). Replaces the per-run fills, which are transparent in that idiom.
    */

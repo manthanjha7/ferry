@@ -73,6 +73,24 @@ const FAMILY_FALLBACKS: Record<string, string[]> = {
 
 const LAST_RESORT = ["Inter", "Roboto", "Arial", "Helvetica"];
 
+const FONT_LOAD_TIMEOUT_MS = 20000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("font load timed out")), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 export type FontResolver = {
   resolve: (family: string, weight: number, italic: boolean) => FontName;
   substitutions: string[];
@@ -81,7 +99,16 @@ export type FontResolver = {
 export async function createFontResolver(
   requests: Array<{ family: string; weight: number; italic: boolean }>,
 ): Promise<FontResolver> {
-  const available = await figma.listAvailableFontsAsync();
+  // Both of these go to Figma's servers. When those are slow ("Unable to
+  // establish connection to Figma after 10 seconds", seen in a real run), one
+  // retry for the font list, and every load bounded, so a slow server costs
+  // fonts falling back to Inter rather than an import hung on "Building".
+  let available: Font[];
+  try {
+    available = await figma.listAvailableFontsAsync();
+  } catch {
+    available = await figma.listAvailableFontsAsync();
+  }
 
   const families = new Map<string, Set<string>>();
   for (const font of available) {
@@ -160,7 +187,7 @@ export async function createFontResolver(
   await Promise.all(
     Array.from(needed.values()).map(async (font) => {
       try {
-        await figma.loadFontAsync(font);
+        await withTimeout(figma.loadFontAsync(font), FONT_LOAD_TIMEOUT_MS);
       } catch {
         failed.add(`${font.family}|${font.style}`);
         substitutions.add(`${font.family} ${font.style} → Inter (could not load)`);
@@ -170,7 +197,7 @@ export async function createFontResolver(
 
   // Inter Regular is the universal fallback for anything that still fails.
   try {
-    await figma.loadFontAsync({ family: "Inter", style: "Regular" });
+    await withTimeout(figma.loadFontAsync({ family: "Inter", style: "Regular" }), FONT_LOAD_TIMEOUT_MS);
   } catch {
     // Nothing further we can do; buildText drops the layer and says so.
   }

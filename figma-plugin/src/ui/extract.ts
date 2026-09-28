@@ -198,6 +198,7 @@ export async function mountDocument(
     propOverrides: options.propOverrides,
   });
 
+  debug("resolved");
   for (const el of Array.from(parsed.querySelectorAll("script"))) el.remove();
 
   // Claude Design wraps content in <x-dc> with a <helmet> of asset links.
@@ -251,6 +252,7 @@ export async function mountDocument(
   // has to have finished loading before anything is measured — otherwise every
   // colour resolves as a bare literal and the whole binding feature no-ops.
   await waitForStylesheets(adopted);
+  debug("stylesheets loaded");
   emulateViewport(container, adopted, viewport);
   // Claude Design's runtime (support.js) resets `html, body { margin: 0 }`,
   // so its documents start at 0; plain HTML gets the browser's 8px.
@@ -275,7 +277,9 @@ export async function mountDocument(
     }
   }
   await waitForAssets(container);
+  debug("assets loaded");
   await settleMotion(container, adopted, reveal.flush, clock);
+  debug("motion settled");
   materializePseudoElements(container);
   anchorFixedToViewport(container, viewport);
 
@@ -518,6 +522,49 @@ function orderByStacking(children: IRNode[], sources: Array<Element | null>): vo
   const order = children.map((_, i) => i).sort((a, b) => z[a] - z[b] || a - b);
   const sorted = order.map((i) => children[i]);
   children.splice(0, children.length, ...sorted);
+}
+
+/**
+ * A text box that is wider than its words on purpose keeps its width.
+ *
+ * Figma text hugs by default, which is right for a label in a column. It is
+ * wrong for an icon glyph in a 16px column (every sidebar label moved 3-8px
+ * left) and for centred or right-aligned copy, where a hugging box puts the
+ * words at the left edge. So: a flex-row item or inline-block with room to
+ * spare, or any text not aligned to the start, keeps its measured width.
+ */
+function keepsItsWidth(el: HTMLElement, style: CSSStyleDeclaration, rect: DOMRect, text: IRText): boolean {
+  const range = el.ownerDocument.createRange();
+  range.selectNodeContents(el);
+  const content = range.getBoundingClientRect().width;
+  if (!(rect.width - content > 2)) return false;
+  if (text.align === "CENTER" || text.align === "RIGHT" || text.align === "JUSTIFIED") return true;
+  const parent = el.parentElement ? getComputedStyle(el.parentElement) : null;
+  const rowItem = !!parent && /flex/.test(parent.display) && !parent.flexDirection.startsWith("column");
+  return rowItem || /^inline-(block|flex|grid)$/.test(style.display);
+}
+
+/**
+ * Keep a text block the height it rendered at.
+ *
+ * Mixing faces on one line (Geist with an italic Newsreader word, the
+ * portfolio's headline) makes the browser's line boxes taller than
+ * `line-height`: that h1 rendered 160px for two 78px lines. Figma lays text
+ * out at exactly lines x line-height, so the block came in 4px short and
+ * everything after it in an auto-layout column moved up. When the measured
+ * box is taller than that by more than a pixel, the line height is raised to
+ * share the difference, which is what the lines actually did.
+ */
+function fitLineHeightToBox(text: IRText, height: number, style: CSSStyleDeclaration): void {
+  if (text.maxLines || truncationOf(style)) return;
+  const padding = px(style.paddingTop) + px(style.paddingBottom) + px(style.borderTopWidth) + px(style.borderBottomWidth);
+  const box = height - padding;
+  const lineHeight = Math.max(...text.runs.map((run) => run.lineHeight ?? run.fontSize * 1.2));
+  if (!(lineHeight > 0) || !(box > 0)) return;
+  const lines = Math.max(1, Math.round(box / lineHeight));
+  const fitted = box / lines;
+  if (box - lines * lineHeight <= 1 || fitted - lineHeight > lineHeight * 0.25) return;
+  for (const run of text.runs) run.lineHeight = Math.round(fitted * 100) / 100;
 }
 
 /** How many lines show before an ellipsis, when the CSS cuts text off. */
@@ -2053,6 +2100,7 @@ async function walkMeasured(
   if (isTextContainer(el)) {
     const text = extractText(el, style, ctx);
     if (text && text.characters.trim().length > 0) {
+      fitLineHeightToBox(text, rect.height, style);
       const maxLines = truncationOf(style);
       if (maxLines) text.maxLines = maxLines;
       // `background-clip: text` clips every background to the glyphs. Painted
@@ -2088,8 +2136,12 @@ async function walkMeasured(
         padding.left > 0;
 
       if (!decorated) {
+        if (keepsItsWidth(el, style, rect, text)) text.fixedWidth = true;
         return {
           kind: "TEXT",
+          // Figma's own convention: a text layer is named by its words, and
+          // stays in step when the copy is edited. An authored name would go
+          // stale the first time it was.
           name: truncate(text.characters, 40),
           ...base,
           fills: [],
@@ -2208,6 +2260,10 @@ async function walkMeasured(
     if (child.nodeType !== Node.ELEMENT_NODE) continue;
     const node = await walk(child as HTMLElement, el, ctx);
     if (node) {
+      // Out of flow in the source, out of flow in Figma: an auto-layout parent
+      // would otherwise lay a badge or overlay out as the next item in the row.
+      const position = getComputedStyle(child as Element).position;
+      if (position === "absolute" || position === "fixed") node.absolute = true;
       children.push(node);
       sources.push(child as Element);
     }
@@ -2283,7 +2339,16 @@ function looseTextNode(
   if (rect.width <= 0 || rect.height <= 0) return null;
 
   const style = getComputedStyle(parent);
-  const characters = raw.replace(/\s+/g, " ").trim();
+  // The space between this text and an inline neighbour is a real rendered
+  // space, and trimming it glued "Explore my work" to its arrow ("work↓").
+  // A flex or grid parent drops it, as the browser does: each run there is
+  // its own item and edge spaces collapse away.
+  const flowing = !/flex|grid/.test(style.display);
+  const inlineNeighbour = (el: Element | null) =>
+    !!el && /^inline/.test(getComputedStyle(el).display);
+  const lead = flowing && /^\s/.test(raw) && inlineNeighbour(text.previousElementSibling) ? " " : "";
+  const tail = flowing && /\s$/.test(raw) && inlineNeighbour(text.nextElementSibling) ? " " : "";
+  const characters = lead + raw.replace(/\s+/g, " ").trim() + tail;
   const run = makeRun(0, characters.length, parent, ctx);
 
   const lineHeight = run.lineHeight ?? run.fontSize * 1.25;
@@ -2714,7 +2779,7 @@ function deriveLayout(
     // Figma has no reversed auto-layout; reorder to match what was rendered.
     if (reversed) children.reverse();
 
-    return {
+    const flex: IRLayout = {
       mode: vertical ? "VERTICAL" : "HORIZONTAL",
       gap: px(vertical ? style.rowGap : style.columnGap),
       gapToken: gapToken(el, style, vertical, ctx),
@@ -2726,6 +2791,7 @@ function deriveLayout(
       crossAlign: mapAlign(style.alignItems),
       source: "explicit-flex",
     };
+    return verifyFlexRow(flex, children, el.getBoundingClientRect());
   }
 
   if (style.display === "grid" || style.display === "inline-grid") {
@@ -2760,6 +2826,95 @@ function deriveLayout(
 
   if (!ctx.options.inferStacks) return undefined;
   return inferStack(children, padding);
+}
+
+/**
+ * Keep a flex row's auto-layout only if Figma would put its children where the
+ * browser did.
+ *
+ * Trusted blindly, `margin-left: auto` (the date pushed to the right end of a
+ * tab bar) came in 330px out of place, and space-around/evenly fell to MIN.
+ * The check simulates Figma's placement from alignment, gap and padding along
+ * the main axis. When that misses by more than 1.5px the row is rebuilt from
+ * what was measured, in the order a designer would reach for:
+ *   - one common gap: MIN alignment with that gap and the measured start;
+ *   - one gap much wider than the rest: a FILL spacer there (how a designer
+ *     builds margin-auto in Figma, and it stays responsive);
+ *   - anything else: no auto-layout, exact positions, rather than a wrong one.
+ * Wrapping rows are left alone. The approach is Figit's (MIT) layout check.
+ */
+function verifyFlexRow(layout: IRLayout, children: IRNode[], box: DOMRect): IRLayout | undefined {
+  if (layout.wrap) return layout;
+  const flow = children.filter((c) => !c.absolute);
+  if (flow.length < 2) return layout;
+  const horizontal = layout.mode === "HORIZONTAL";
+  const pos = (n: IRNode) => (horizontal ? n.x : n.y);
+  const size = (n: IRNode) => (horizontal ? n.width : n.height);
+  const frame = horizontal ? box.width : box.height;
+  const padStart = horizontal ? layout.padding.left : layout.padding.top;
+  const padEnd = horizontal ? layout.padding.right : layout.padding.bottom;
+  const inner = frame - padStart - padEnd;
+  const sum = flow.reduce((t, n) => t + size(n), 0);
+  const TOL = 1.5;
+
+  const predicted: number[] = [];
+  let gap = layout.gap;
+  let at = padStart;
+  if (layout.primaryAlign === "CENTER") at = padStart + (inner - sum - gap * (flow.length - 1)) / 2;
+  if (layout.primaryAlign === "MAX") at = padStart + inner - sum - gap * (flow.length - 1);
+  if (layout.primaryAlign === "SPACE_BETWEEN") gap = (inner - sum) / (flow.length - 1);
+  for (const n of flow) {
+    predicted.push(at);
+    at += size(n) + gap;
+  }
+  if (flow.every((n, i) => Math.abs(pos(n) - predicted[i]) <= TOL)) return layout;
+
+  const gaps = flow.slice(1).map((n, i) => pos(n) - (pos(flow[i]) + size(flow[i])));
+  if (gaps.some((g) => g < -TOL)) return undefined; // Overlap: not a row Figma can draw.
+  const sorted = [...gaps].sort((a, b) => a - b);
+  // Lower middle: with two gaps the upper one is the wide gap itself.
+  const common = sorted[Math.floor((sorted.length - 1) / 2)];
+  const start = pos(flow[0]);
+  const withPadding = (startPad: number, endPad?: number): IRLayout["padding"] =>
+    horizontal
+      ? { ...layout.padding, left: startPad, ...(endPad !== undefined ? { right: endPad } : {}) }
+      : { ...layout.padding, top: startPad, ...(endPad !== undefined ? { bottom: endPad } : {}) };
+
+  if (gaps.every((g) => Math.abs(g - common) <= 1)) {
+    return { ...layout, gap: Math.round(common * 100) / 100, primaryAlign: "MIN", padding: withPadding(start), gapToken: undefined };
+  }
+
+  const wide = gaps.map((g, i) => (g > common + 2 ? i : -1)).filter((i) => i >= 0);
+  if (wide.length === 1 && gaps.every((g, i) => i === wide[0] || Math.abs(g - common) <= 1)) {
+    const k = wide[0];
+    const last = flow[flow.length - 1];
+    const endPad = frame - (pos(last) + size(last));
+    const spacer: IRNode = {
+      kind: "FRAME",
+      name: "Spacer",
+      x: horizontal ? pos(flow[k]) + size(flow[k]) + common : flow[k].x,
+      y: horizontal ? flow[k].y : pos(flow[k]) + size(flow[k]) + common,
+      width: horizontal ? Math.max(0, gaps[k] - 2 * common) : 1,
+      height: horizontal ? 1 : Math.max(0, gaps[k] - 2 * common),
+      opacity: 1,
+      rotation: 0,
+      clips: false,
+      fills: [],
+      cornerRadius: { tl: 0, tr: 0, br: 0, bl: 0 },
+      effects: [],
+      children: [],
+      sizing: horizontal ? { horizontal: "FILL", vertical: "FIXED" } : { horizontal: "FIXED", vertical: "FILL" },
+    };
+    children.splice(children.indexOf(flow[k]) + 1, 0, spacer);
+    return {
+      ...layout,
+      gap: Math.round(common * 100) / 100,
+      primaryAlign: "MIN",
+      padding: withPadding(start, Math.max(0, endPad)),
+      gapToken: undefined,
+    };
+  }
+  return undefined;
 }
 
 /**
@@ -2865,6 +3020,11 @@ function applyChildSizing(
   ) as HTMLElement[];
 
   for (const child of children) {
+    // A spacer verifyFlexRow inserted has no element; it fills the main axis.
+    if (child.name === "Spacer" && child.sizing && child.children.length === 0 && child.fills.length === 0) {
+      child.grow = true;
+      continue;
+    }
     const el = elements.find(
       (candidate) => matchesNode(candidate, child),
     );

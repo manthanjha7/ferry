@@ -243,7 +243,7 @@ builds. Nothing in `src/` is stubbed:
 
 ```bash
 npx esbuild test/e2e/run.ts --bundle --outfile=test/e2e/run.mjs --format=esm --platform=node --target=node18
-node test/e2e/run.mjs                      # 135 checks
+node test/e2e/run.mjs                      # 138 checks
 ```
 
 It covers batch layout and spacing, state enumeration, prototype flows, variable
@@ -257,7 +257,7 @@ look at.
 ## Status
 
 Both halves are exercised and the plugin runs inside Figma. The extractor is
-covered by 201 browser assertions and the builder by 135 end-to-end assertions
+covered by 201 browser assertions and the builder by 138 end-to-end assertions
 against a mock Figma API, and real Claude Design exports have been imported
 through the real code path, including the multi-screen panel system this was
 built against.
