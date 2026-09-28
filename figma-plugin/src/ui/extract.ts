@@ -648,6 +648,77 @@ function dataUrlBytes(url: string): Uint8Array | null {
   return bytes.length > 100 ? bytes : null;
 }
 
+/** Icon fonts: the family names they ship under. */
+const ICON_FONT = /material (symbols|icons)|font ?awesome|\bfa-|ionicons|remixicon|bootstrap-icons|phosphor|tabler|feather|icomoon|glyphicons|boxicons|la-(solid|regular|brands)/i;
+
+/**
+ * An icon drawn by an icon font, as the picture it is.
+ *
+ * Material Symbols draws `<span class="material-symbols-outlined">home</span>`
+ * as a house through a ligature; Font Awesome draws a private-use character
+ * from `::before`. As text, Figma gets the word "home", or a box, in whatever
+ * face it substitutes. The glyph is painted with the page's own font onto a
+ * canvas at 2x and imported as an image, so it looks the way it did. When the
+ * font never loaded (the canvas would paint the word), it stays text and the
+ * import says why.
+ */
+async function iconFontNode(
+  el: HTMLElement,
+  style: CSSStyleDeclaration,
+  base: BoxBase,
+  rect: DOMRect,
+  ctx: Ctx,
+): Promise<IRNode | null> {
+  if (el.children.length > 0) return null;
+  const text = (el.textContent ?? "").trim();
+  if (!text || text.length > 40) return null;
+  const privateUse = /^[\uE000-\uF8FF]+$/.test(text);
+  const ligature = /^[a-z0-9_]+$/.test(text) && ICON_FONT.test(style.fontFamily);
+  if (!privateUse && !ligature) return null;
+  if (privateUse && !ICON_FONT.test(style.fontFamily) && !/icon|fa|glyph/i.test(el.className?.toString() ?? "")) return null;
+
+  const font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+  try {
+    await document.fonts.load(font, text);
+  } catch {
+    // Measured below either way.
+  }
+  const size = px(style.fontSize);
+  const scale = 2;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.ceil(rect.width * scale));
+  canvas.height = Math.max(1, Math.ceil(rect.height * scale));
+  const paint = canvas.getContext("2d");
+  if (!paint) return null;
+  paint.scale(scale, scale);
+  paint.font = font;
+  const metrics = paint.measureText(text);
+  // A ligature that did not form is the word, several ems wide.
+  if (ligature && metrics.width > size * 1.6) {
+    ctx.warnings.push(`The icon "${text}" imported as its name: its icon font did not load.`);
+    return null;
+  }
+  const glyphs = document.createRange();
+  glyphs.selectNodeContents(el);
+  const box = glyphs.getBoundingClientRect();
+  paint.fillStyle = style.color;
+  paint.textBaseline = "alphabetic";
+  paint.fillText(text, box.left - rect.left, box.top - rect.top + metrics.fontBoundingBoxAscent);
+  const bytes = dataUrlBytes(canvas.toDataURL("image/png"));
+  if (!bytes) return null;
+  return {
+    kind: "IMAGE",
+    name: el.getAttribute("data-name") || `${text.replace(/_/g, " ")} icon`,
+    imageScale: "FIT",
+    ...base,
+    fills: [],
+    cornerRadius: cornerRadii(style),
+    effects: effects(style, ctx),
+    imageBytes: bytes,
+    children: [],
+  };
+}
+
 /**
  * An SVG used as an image, as PNG bytes Figma can take.
  *
@@ -2273,6 +2344,9 @@ async function walkMeasured(
       children: [],
     };
   }
+
+  const icon = await iconFontNode(el, style, base, rect, ctx);
+  if (icon) return icon;
 
   if (isTextContainer(el)) {
     const text = extractText(el, style, ctx);

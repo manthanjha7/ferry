@@ -20,6 +20,7 @@ const CASES = {
   "theme-root": { mode: "build" },
   awadh: { mode: "none" },
   control: { mode: "none" },
+  icons: { mode: "none" },
 };
 const [prefix, ...only] = process.argv.slice(2);
 const names = only.length ? only : Object.keys(CASES);

@@ -46,6 +46,13 @@ def inline(b):
 bad = 0
 for b in ref:
     cands = (figma.get(b["name"]) if b["name"] else None) or (figma.get("text:" + " ".join(b["text"].split()).lower()) if b.get("text") else None)
+    if b.get("text") and (not cands or all(c["type"] == "TEXT" and c["x"] > b["x"] + 8 for c in cands)):
+        # An icon-font ligature ("home") is imported as the picture it draws,
+        # named after it.
+        icon = figma.get(b["text"].strip().replace("_", " ") + " icon")
+        if icon:
+            cands = icon
+            b = dict(b, kind="centre")
     if not cands and inline(b):
         continue
     if not cands:
@@ -62,6 +69,8 @@ for b in ref:
         print(f"MISSING  near {b['name'] or 'text:' + (b.get('text') or '')[:40]}")
         bad += 1
         continue
+    if b.get("name") and figma.get(b["name"]) and c["type"] == "RECTANGLE" and "icon" in b["name"].lower():
+        kind = "centre"
     if kind == "box" and by_text and c["type"] == "TEXT":
         # A padded box (a tab, a pill) matched by its words: compare centres.
         kind = "centre"

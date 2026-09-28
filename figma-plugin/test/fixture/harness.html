@@ -1373,6 +1373,10 @@
           check("Claude Design's style-hover attribute is a hover state too", !!blue && Math.round(blue.b * 255) === 255 && Math.round(chip.fills[0].color.b * 255) === 240, JSON.stringify({ rest: chip?.fills?.[0]?.color, hover: blue }));
           check("a layer with no hover styling gets no hover state", !!plainLink && !plainLink.hover, JSON.stringify(!!plainLink?.hover));
         }
+        {
+          const t = (function f(n) { return n.kind === "TEXT" && n.text.characters === "home" ? n : (n.children || []).map(f).find(Boolean) || null; })(lc.root);
+          check("an icon whose icon font never loaded stays its name, and the import says so", !!t && lc.warnings.some((w) => /icon "home".*did not load/.test(w)), JSON.stringify({ text: !!t, warn: lc.warnings.filter((w) => /icon/.test(w)) }));
+        }
         const tight = (function f(n) { return n.kind === "TEXT" && n.text.characters.startsWith("Tight leading") ? n : (n.children || []).map(f).find(Boolean) || null; })(lc.root);
         check("a wrapped paragraph whose glyph boxes overlap the next line (tight leading) is still wrapped", tight?.text?.singleLine === false, JSON.stringify(tight && { single: tight.text.singleLine, h: tight.height }));
         check("preconnect links are not reported as missing stylesheets", lc.missingStylesheets.length === 0, JSON.stringify(lc.missingStylesheets));

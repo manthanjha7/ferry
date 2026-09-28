@@ -105,7 +105,9 @@ try {
   await evalIn("window.scrollTo(0, 0)");
   await sleep(2500);
   // The page's content, not the viewport: a short page is not 900px of white.
-  const full = await evalIn(`Math.ceil(Math.max(1, ...Array.from(document.body.querySelectorAll("*")).map((el) => el.getBoundingClientRect().bottom + scrollY)))`);
+  // At least one screen: the browser paints the page's background across the
+  // whole viewport, and Ferry's frame is one viewport tall at minimum too.
+  const full = await evalIn(`Math.ceil(Math.max(900, ...Array.from(document.body.querySelectorAll("*")).map((el) => el.getBoundingClientRect().bottom + scrollY)))`);
   // Every named element's box, for a per-element diff against Figma's tree.
   const boxes = await evalIn(`JSON.stringify(Array.from(document.querySelectorAll("body *")).filter((el) => el.hasAttribute("data-name") || (/^(H[1-6]|P|LI)$/.test(el.tagName) && el.innerText.trim()) || (el.children.length === 0 && el.innerText && el.innerText.trim() && el.getClientRects().length)).slice(0, 800).map((el) => {
     const cs = getComputedStyle(el);
