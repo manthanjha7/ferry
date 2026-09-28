@@ -13,6 +13,13 @@
 
 import { bootAnimation, readAnimationSpec, settledMoment, type LiveAnimation } from "./animation";
 import { installVirtualClock, real, SETTLE_HORIZON_MS, type VirtualClock } from "./clock";
+import { markComponents } from "./components";
+
+/** The page, with its repeated elements marked as components. */
+function withComponents(root: IRNode): IRNode {
+  markComponents(root);
+  return root;
+}
 import {
   DEFAULT_EXTRACT_OPTIONS,
   type AxisAlign,
@@ -1661,7 +1668,7 @@ async function measureMounted(
               shadows: tokens.shadows,
             }
           : undefined,
-      root,
+      root: opts.components === false ? root : withComponents(root),
       warnings: ctx.warnings,
       missingStylesheets: handle.missingStylesheets,
       dynamicContent: handle.dynamicContent,
@@ -3293,6 +3300,14 @@ function applyChildSizing(
       if (selfAlign === "stretch") cross = "FILL";
     }
 
+    // One line of text that is as wide as its words hugs them, the way a
+    // designer sets a label: it renders the same, stays right when the words
+    // are edited, and lets an instance's text size itself to its own words.
+    if (hugsItsWords(child)) {
+      if (main === "FIXED") main = "HUG";
+      if (cross === "FIXED") cross = "HUG";
+    }
+
     child.sizing =
       layout.mode === "HORIZONTAL"
         ? { horizontal: main, vertical: cross }
@@ -3336,6 +3351,23 @@ function keepUnequalFillsFixed(children: IRNode[], layout: IRLayout): void {
       if (child.sizing) child.sizing = horizontal ? { ...child.sizing, horizontal: "FIXED" } : { ...child.sizing, vertical: "FIXED" };
     }
   }
+}
+
+/**
+ * A text layer Figma sizes to its words: one line, no kept width, no trailing
+ * space (Figma's auto width drops it), not truncated, no gradient box.
+ */
+export function hugsItsWords(node: IRNode): boolean {
+  const t = node.text;
+  return (
+    node.kind === "TEXT" &&
+    !!t &&
+    t.singleLine &&
+    !t.fixedWidth &&
+    !t.maxLines &&
+    !t.glyphFill &&
+    !/\s$/.test(t.characters)
+  );
 }
 
 function matchesNode(el: HTMLElement, node: IRNode): boolean {

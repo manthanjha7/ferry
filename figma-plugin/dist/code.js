@@ -971,12 +971,15 @@
       count: 0,
       total: countNodes(doc.root),
       onProgress,
-      lastYield: Date.now()
+      lastYield: Date.now(),
+      components: /* @__PURE__ */ new Map(),
+      instanceCounts: /* @__PURE__ */ new Map()
     };
     let root = null;
     try {
       root = await buildNode(doc.root, ctx);
       root.name = doc.name;
+      unmakeLoneComponents(ctx);
       if (doc.props) root.setPluginData("ferry.props", JSON.stringify(doc.props));
       figma.currentPage.appendChild(root);
       if (options.place !== false) placeBesideExistingContent(root);
@@ -1351,8 +1354,9 @@
     const built = [];
     const builtIr = [];
     for (const child of node.children) {
-      const childNode = await buildNode(child, ctx);
+      let childNode = await buildNode(child, ctx);
       if (!childNode) continue;
+      if (child.component) childNode = asComponent(childNode, child, ctx);
       frame.appendChild(childNode);
       built.push(childNode);
       builtIr.push(child);
@@ -1411,6 +1415,108 @@
     }
     return frame;
   }
+  function asComponent(built, ir, ctx) {
+    var _a;
+    const spec = ir.component;
+    if (built.type !== "FRAME") return built;
+    try {
+      if (spec.main) {
+        const layerName = built.name;
+        const main2 = figma.createComponentFromNode(built);
+        main2.setPluginData("ferry.layer", layerName);
+        main2.name = spec.name;
+        ctx.components.set(spec.key, main2);
+        return main2;
+      }
+      const main = ctx.components.get(spec.key);
+      if (!main) return built;
+      const instance = main.createInstance();
+      instance.name = built.name;
+      if (Math.abs(instance.width - built.width) > 0.01 || Math.abs(instance.height - built.height) > 0.01) {
+        instance.resize(built.width, built.height);
+      }
+      carryOverrides(built, instance, ctx);
+      const drift = geometryDrift(built, instance);
+      if (drift) {
+        instance.remove();
+        console.log(`[ferry] kept one "${spec.name}" as a plain layer: as an instance, ${drift}`);
+        return built;
+      }
+      built.remove();
+      ctx.instanceCounts.set(spec.key, ((_a = ctx.instanceCounts.get(spec.key)) != null ? _a : 0) + 1);
+      return instance;
+    } catch (error) {
+      ctx.warnings.push(`Kept "${ir.name}" as a plain layer: ${error.message}`);
+      return built;
+    }
+  }
+  function unmakeLoneComponents(ctx) {
+    var _a;
+    for (const [key, main] of ctx.components) {
+      if (((_a = ctx.instanceCounts.get(key)) != null ? _a : 0) > 0) continue;
+      const parent = main.parent;
+      if (!parent || !("insertChild" in parent)) continue;
+      try {
+        const stand = main.createInstance();
+        parent.insertChild(parent.children.indexOf(main), stand);
+        const m = main;
+        const s = stand;
+        if (m.layoutPositioning === "ABSOLUTE") s.layoutPositioning = "ABSOLUTE";
+        s.x = main.x;
+        s.y = main.y;
+        if ("layoutSizingHorizontal" in m && m.layoutSizingHorizontal) s.layoutSizingHorizontal = m.layoutSizingHorizontal;
+        if ("layoutSizingVertical" in m && m.layoutSizingVertical) s.layoutSizingVertical = m.layoutSizingVertical;
+        s.layoutGrow = m.layoutGrow;
+        s.rotation = main.rotation;
+        const frame = stand.detachInstance();
+        frame.name = main.getPluginData("ferry.layer") || main.name;
+        main.remove();
+        ctx.components.delete(key);
+      } catch (e) {
+      }
+    }
+  }
+  function geometryDrift(from, to) {
+    const off = (a, b) => Math.abs(a - b) > 0.5;
+    if (off(from.width, to.width) || off(from.height, to.height)) {
+      return `"${from.name}" came out ${Math.round(to.width)}x${Math.round(to.height)}, not ${Math.round(from.width)}x${Math.round(from.height)}`;
+    }
+    if ("children" in from && "children" in to) {
+      const a = from.children;
+      const b = to.children;
+      if (a.length !== b.length) return "its layers did not match";
+      for (let i = 0; i < a.length; i++) {
+        if (off(a[i].x, b[i].x) || off(a[i].y, b[i].y)) return `"${a[i].name}" moved`;
+        const inner = geometryDrift(a[i], b[i]);
+        if (inner) return inner;
+      }
+    }
+    return null;
+  }
+  function carryOverrides(from, to, ctx) {
+    if (from.type === "TEXT" && to.type === "TEXT") {
+      if (from.characters !== to.characters) {
+        try {
+          to.characters = from.characters;
+          if (to.textAutoResize !== from.textAutoResize) to.textAutoResize = from.textAutoResize;
+          if (from.textAutoResize !== "WIDTH_AND_HEIGHT") to.resize(from.width, from.height);
+        } catch (error) {
+          ctx.warnings.push(`Could not set the text "${from.characters.slice(0, 30)}" on an instance: ${error.message}`);
+        }
+      }
+      return;
+    }
+    if (from.type === "RECTANGLE" && to.type === "RECTANGLE") {
+      const paints = from.fills;
+      if (Array.isArray(paints) && paints.some((p) => p.type === "IMAGE")) to.fills = paints;
+    }
+    if ("children" in from && "children" in to) {
+      const kids = to.children;
+      from.children.forEach((child, i) => {
+        if (kids[i]) carryOverrides(child, kids[i], ctx);
+      });
+    }
+  }
   function rotateInPlace(node, ir, positioned) {
     const turnable = node;
     try {
@@ -1444,7 +1550,7 @@
       const spec = (_a = irChildren[i]) == null ? void 0 : _a.sizing;
       if (!spec) continue;
       const child = built[i];
-      const canHug = child.type === "TEXT" || child.type === "FRAME" && child.layoutMode !== "NONE";
+      const canHug = child.type === "TEXT" || (child.type === "FRAME" || child.type === "COMPONENT" || child.type === "INSTANCE") && child.layoutMode !== "NONE";
       try {
         child.layoutSizingHorizontal = spec.horizontal === "HUG" && !canHug ? "FIXED" : spec.horizontal;
       } catch (e) {

@@ -729,6 +729,57 @@ export function createFigmaMock(options: MockOptions = {}): FigmaMock {
     }
   }
 
+  /**
+   * A copy of a node and its subtree, fresh ids, detached. What
+   * `createInstance` needs: the instance starts as the main component's layers.
+   */
+  function cloneSubtree(node: any): any {
+    const raw = node;
+    const copy = Object.create(Object.getPrototypeOf(raw));
+    for (const key of Object.keys(raw)) {
+      if (key === "children" || key === "parent" || key === "id" || key === "_pluginData") continue;
+      const value = (raw as any)[key];
+      copy[key] = value && typeof value === "object" && !(value instanceof Map) ? deepClone(value) : value;
+    }
+    Object.defineProperty(copy, "id", { value: genId(raw.type), writable: false, enumerable: true });
+    copy._pluginData = new Map(raw._pluginData ?? []);
+    copy.parent = null;
+    copy.removed = false;
+    if ("children" in raw) {
+      copy.children = [];
+      for (const child of raw.children) {
+        const c = cloneSubtree(child);
+        c.parent = copy;
+        copy.children.push(c);
+      }
+    }
+    return guard(copy);
+  }
+
+  class ComponentNodeImpl extends FrameNodeImpl {
+    constructor() {
+      super("Component");
+      (this as any).type = "COMPONENT";
+    }
+
+    /** On an instance: it becomes a plain frame, where it stands. */
+    detachInstance(): any {
+      assertAlive(this);
+      if (this.type !== "INSTANCE") throw new Error("Only an instance can be detached.");
+      (this as any).type = "FRAME";
+      delete (this as any).mainComponent;
+      return this;
+    }
+
+    createInstance(): any {
+      assertAlive(this);
+      const instance = cloneSubtree(this);
+      instance.type = "INSTANCE";
+      instance.mainComponent = this;
+      return instance;
+    }
+  }
+
   class RectangleNodeImpl extends NodeBase {
     fills: Paint[] = [defaultGrayFill()];
     strokes: Paint[] = [];
@@ -1409,6 +1460,23 @@ export function createFigmaMock(options: MockOptions = {}): FigmaMock {
       return guard(new FrameNodeImpl());
     },
 
+    /** Figma's own: the node becomes a component where it stands. */
+    createComponentFromNode(node: any): ComponentNodeImpl {
+      assertAlive(node);
+      if (node.type !== "FRAME") throw new Error(`Cannot make a component from a ${node.type}.`);
+      const component = guard(new ComponentNodeImpl());
+      for (const key of Object.keys(node)) {
+        if (key === "children" || key === "parent" || key === "id" || key === "type" || key === "removed" || key === "_pluginData") continue;
+        (component as any)[key] = (node as any)[key];
+      }
+      const parent = node.parent;
+      const index = parent ? parent.children.indexOf(node) : -1;
+      for (const child of [...node.children]) component.appendChild(child);
+      if (parent) parent.insertChild(index, component);
+      node.remove();
+      return component;
+    },
+
     createText(): TextNodeImpl {
       return guard(new TextNodeImpl());
     },
@@ -1534,7 +1602,8 @@ export function createFigmaMock(options: MockOptions = {}): FigmaMock {
       base.bottomLeftRadius = node.bottomLeftRadius;
     }
 
-    if (node.type === "FRAME") {
+    if (node.type === "INSTANCE") base.mainComponentId = node.mainComponent?.id;
+    if (node.type === "FRAME" || node.type === "COMPONENT" || node.type === "INSTANCE") {
       base.reactions = deepClone([...node.reactions]);
       base.clipsContent = node.clipsContent;
       base.layoutMode = node.layoutMode;

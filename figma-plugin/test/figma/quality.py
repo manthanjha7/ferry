@@ -11,12 +11,14 @@ when a design system exists, and fonts Figma substituted.
 import json, re, sys
 tree = json.load(open(sys.argv[1]))
 stats = {"layers": 0, "frames": 0, "text": 0, "images": 0, "vectors": 0, "generic_names": [], "absolute_frames_with_children": 0,
-         "auto_layout_frames": 0, "empty_frames": 0, "invisible": 0, "bound_fills": 0, "fills": 0, "fonts": {}}
+         "auto_layout_frames": 0, "empty_frames": 0, "invisible": 0, "bound_fills": 0, "fills": 0, "fonts": {}, "components": 0, "instances": 0}
 GENERIC = re.compile(r"^(Frame|Rectangle|Vector|Div|Span|Container|Layer)( \d+)?$", re.I)
 def walk(n, depth=0):
     stats["layers"] += 1
     t = n["type"]
-    if t == "FRAME":
+    if t == "COMPONENT": stats["components"] += 1
+    if t == "INSTANCE": stats["instances"] += 1
+    if t in ("FRAME", "COMPONENT", "INSTANCE"):
         stats["frames"] += 1
         kids = n.get("children", [])
         if n.get("layout"): stats["auto_layout_frames"] += 1

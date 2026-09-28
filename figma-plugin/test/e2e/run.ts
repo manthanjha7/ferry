@@ -74,6 +74,7 @@ import {
   type PropCombination,
 } from "../../src/ui/states";
 import { createFigmaMock, type MockOptions } from "./figma-mock";
+import { markComponents } from "../../src/ui/components";
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -4447,6 +4448,62 @@ async function scenarioX(ready: boolean): Promise<void> {
   void result;
 }
 
+async function scenarioY(ready: boolean): Promise<void> {
+  const p = "Y (components):";
+  const names = [
+    `${p} the first of three identical cards is the main component, in place`,
+    `${p} the other two are its instances, where their copies were`,
+    `${p} each instance keeps its own words`,
+    `${p} a card that differs in shape stays a plain frame`,
+    `${p} a component whose only copy could not be an instance goes back to a plain frame`,
+  ];
+  if (!ready) {
+    for (const n of names) skip(n, "captured/fixture-screen.json not found");
+    return;
+  }
+  const mock = freshMock();
+  const doc = selectFieldDoc();
+  const run = { ...doc.root.children[0].children[0].text!.runs[0] };
+  const plain = { opacity: 1, rotation: 0, clips: false, cornerRadius: { tl: 8, tr: 8, br: 8, bl: 8 }, effects: [] };
+  const card = (title: string, x: number, width = 200): IRNode => ({
+    ...plain, kind: "FRAME", name: "Stat card", x, y: 0, width, height: 80,
+    fills: [{ type: "SOLID", color: { r: 1, g: 1, b: 1, a: 1 } }],
+    children: [{ ...plain, cornerRadius: { tl: 0, tr: 0, br: 0, bl: 0 }, kind: "TEXT", name: title, x: 16, y: 16, width: 120, height: 20, fills: [],
+      text: { characters: title, runs: [{ ...run, end: title.length }], align: "LEFT", verticalAlign: "TOP", singleLine: true, fixedWidth: true },
+      children: [] }],
+  } as IRNode);
+  doc.root.children = [card("Sunday", 0), card("Leads", 220), card("Spend", 440), card("Odd one", 660, 240)];
+  markComponents(doc.root);
+  await buildDocument(doc, { kind: "none" }, () => {});
+  const raw = mock.getRootNodes()[0];
+  const tree = mock.serializeTree(raw);
+  const kids = tree.children;
+  check(names[0], kids[0]?.type === "COMPONENT" && kids[0].x === 0, `${kids[0]?.type} x=${kids[0]?.x}`);
+  check(names[1], kids[1]?.type === "INSTANCE" && kids[2]?.type === "INSTANCE" && kids[1].mainComponentId === kids[0].id && kids[2].mainComponentId === kids[0].id && kids[1].x === 220 && kids[2].x === 440,
+    JSON.stringify(kids.slice(1, 3).map((k: any) => [k.type, k.mainComponentId, k.x])));
+  check(names[2], kids[0]?.children?.[0]?.characters === "Sunday" && kids[1]?.children?.[0]?.characters === "Leads" && kids[2]?.children?.[0]?.characters === "Spend",
+    JSON.stringify(kids.map((k: any) => k.children?.[0]?.characters)));
+  check(names[3], kids[3]?.type === "FRAME" && kids.length === 4, `${kids[3]?.type} n=${kids.length}`);
+
+  // Two hugging labels whose words differ in width: the instance's text would
+  // keep the main's width here, so the copy stays, and the main is undone.
+  const mock2 = freshMock();
+  const doc2 = selectFieldDoc();
+  const pill = (label: string, x: number, w: number): IRNode => ({
+    ...plain, kind: "FRAME", name: "Pill", x, y: 0, width: 100, height: 30,
+    fills: [{ type: "SOLID", color: { r: 0.9, g: 0.9, b: 0.9, a: 1 } }],
+    children: [{ ...plain, cornerRadius: { tl: 0, tr: 0, br: 0, bl: 0 }, kind: "TEXT", name: label, x: 8, y: 6, width: w, height: 18, fills: [],
+      text: { characters: label, runs: [{ ...run, end: label.length }], align: "LEFT", verticalAlign: "TOP", singleLine: true },
+      children: [] }],
+  } as IRNode);
+  doc2.root.children = [pill("Go", 0, 20), pill("Longer", 120, 60)];
+  markComponents(doc2.root);
+  await buildDocument(doc2, { kind: "none" }, () => {});
+  const kids2 = mock2.serializeTree(mock2.getRootNodes()[0]).children;
+  check(names[4], kids2.length === 2 && kids2.every((k: any) => k.type === "FRAME") && kids2[0].name === "Pill",
+    JSON.stringify(kids2.map((k: any) => [k.type, k.name, k.x])));
+}
+
 async function scenarioW(ready: boolean): Promise<void> {
   const p = "W (animation scenes play themselves):";
   const names = [
@@ -4895,6 +4952,11 @@ async function main(): Promise<void> {
     await scenarioX(fixtureReady);
   } catch (err) {
     failScenario("X", err);
+  }
+  try {
+    await scenarioY(fixtureReady);
+  } catch (err) {
+    failScenario("Y", err);
   }
 
   if (scenarioAOut) {

@@ -98,6 +98,10 @@ type BuildCtx = {
   total: number;
   onProgress: ProgressFn;
   lastYield: number;
+  /** Main components made so far in this document, by `IRNode.component.key`. */
+  components: Map<string, ComponentNode>;
+  /** How many instances each of those actually got. */
+  instanceCounts: Map<string, number>;
 };
 
 export async function buildDocument(
@@ -123,12 +127,15 @@ export async function buildDocument(
     total: countNodes(doc.root),
     onProgress,
     lastYield: Date.now(),
+    components: new Map(),
+    instanceCounts: new Map(),
   };
 
   let root: FrameNode | null = null;
   try {
     root = (await buildNode(doc.root, ctx)) as FrameNode;
     root.name = doc.name;
+    unmakeLoneComponents(ctx);
 
     // Which combination of props this frame is, in a form that survives being
     // renamed. The name carries it too, right up until a designer tidies the
@@ -959,8 +966,9 @@ async function buildFrame(node: IRNode, ctx: BuildCtx): Promise<FrameNode> {
   // wrong node.
   const builtIr: IRNode[] = [];
   for (const child of node.children) {
-    const childNode = await buildNode(child, ctx);
+    let childNode = await buildNode(child, ctx);
     if (!childNode) continue;
+    if (child.component) childNode = asComponent(childNode, child, ctx);
     frame.appendChild(childNode);
     built.push(childNode);
     builtIr.push(child);
@@ -1041,6 +1049,131 @@ async function buildFrame(node: IRNode, ctx: BuildCtx): Promise<FrameNode> {
 }
 
 /**
+ * A repeated layer as a component: the first one becomes the main component
+ * where it stands, each later one an instance of it that keeps its own words
+ * and images (src/ui/components.ts decided they are otherwise identical).
+ *
+ * Every copy is built first, the ordinary way, so fonts, images and variable
+ * bindings are resolved exactly as for any layer. An instance then takes what
+ * differs from its copy, and the copy is dropped.
+ */
+function asComponent(built: SceneNode, ir: IRNode, ctx: BuildCtx): SceneNode {
+  const spec = ir.component!;
+  if (built.type !== "FRAME") return built;
+  try {
+    if (spec.main) {
+      const layerName = built.name;
+      const main = figma.createComponentFromNode(built);
+      main.setPluginData("ferry.layer", layerName);
+      main.name = spec.name;
+      ctx.components.set(spec.key, main);
+      return main;
+    }
+    const main = ctx.components.get(spec.key);
+    if (!main) return built;
+    const instance = main.createInstance();
+    instance.name = built.name;
+    if (Math.abs(instance.width - built.width) > 0.01 || Math.abs(instance.height - built.height) > 0.01) {
+      instance.resize(built.width, built.height);
+    }
+    carryOverrides(built, instance, ctx);
+    // An instance that does not land exactly where its copy was is a worse
+    // import than the copy: keep the copy.
+    const drift = geometryDrift(built, instance);
+    if (drift) {
+      instance.remove();
+      console.log(`[ferry] kept one "${spec.name}" as a plain layer: as an instance, ${drift}`);
+      return built;
+    }
+    built.remove();
+    ctx.instanceCounts.set(spec.key, (ctx.instanceCounts.get(spec.key) ?? 0) + 1);
+    return instance;
+  } catch (error) {
+    ctx.warnings.push(`Kept "${ir.name}" as a plain layer: ${(error as Error).message}`);
+    return built;
+  }
+}
+
+/**
+ * A main component whose copies all stayed plain layers is a component of
+ * one: noise in the assets panel. It goes back to being a frame (an instance
+ * of it, detached, in its place), keeping its place in the layout.
+ */
+function unmakeLoneComponents(ctx: BuildCtx): void {
+  for (const [key, main] of ctx.components) {
+    if ((ctx.instanceCounts.get(key) ?? 0) > 0) continue;
+    const parent = main.parent;
+    if (!parent || !("insertChild" in parent)) continue;
+    try {
+      const stand = main.createInstance();
+      (parent as ChildrenMixin).insertChild((parent as ChildrenMixin).children.indexOf(main), stand);
+      const m = main as ComponentNode & { layoutSizingHorizontal: string; layoutSizingVertical: string; layoutGrow: number; layoutPositioning: string };
+      const s = stand as InstanceNode & { layoutSizingHorizontal: string; layoutSizingVertical: string; layoutGrow: number; layoutPositioning: string };
+      if (m.layoutPositioning === "ABSOLUTE") s.layoutPositioning = "ABSOLUTE";
+      s.x = main.x;
+      s.y = main.y;
+      if ("layoutSizingHorizontal" in m && m.layoutSizingHorizontal) (s as unknown as { layoutSizingHorizontal: string }).layoutSizingHorizontal = m.layoutSizingHorizontal;
+      if ("layoutSizingVertical" in m && m.layoutSizingVertical) (s as unknown as { layoutSizingVertical: string }).layoutSizingVertical = m.layoutSizingVertical;
+      s.layoutGrow = m.layoutGrow;
+      s.rotation = main.rotation;
+      const frame = stand.detachInstance();
+      frame.name = main.getPluginData("ferry.layer") || main.name;
+      main.remove();
+      ctx.components.delete(key);
+    } catch {
+      // It stays a component of one; still a correct layer.
+    }
+  }
+}
+
+/** Where an instance's layers differ from its copy's, in words, or null. */
+function geometryDrift(from: SceneNode, to: SceneNode): string | null {
+  const off = (a: number, b: number) => Math.abs(a - b) > 0.5;
+  if (off(from.width, to.width) || off(from.height, to.height)) {
+    return `"${from.name}" came out ${Math.round(to.width)}x${Math.round(to.height)}, not ${Math.round(from.width)}x${Math.round(from.height)}`;
+  }
+  if ("children" in from && "children" in to) {
+    const a = (from as ChildrenMixin).children;
+    const b = (to as ChildrenMixin).children;
+    if (a.length !== b.length) return "its layers did not match";
+    for (let i = 0; i < a.length; i++) {
+      if (off(a[i].x, b[i].x) || off(a[i].y, b[i].y)) return `"${a[i].name}" moved`;
+      const inner = geometryDrift(a[i], b[i]);
+      if (inner) return inner;
+    }
+  }
+  return null;
+}
+
+/** The words and images that make this copy this copy, onto its instance. */
+function carryOverrides(from: SceneNode, to: SceneNode, ctx: BuildCtx): void {
+  if (from.type === "TEXT" && to.type === "TEXT") {
+    if (from.characters !== to.characters) {
+      try {
+        to.characters = from.characters;
+        // The main's box was sized for the main's words; this copy's box was
+        // sized for these (a counter "1234" and a typed "Hello, world").
+        if (to.textAutoResize !== from.textAutoResize) to.textAutoResize = from.textAutoResize;
+        if (from.textAutoResize !== "WIDTH_AND_HEIGHT") to.resize(from.width, from.height);
+      } catch (error) {
+        ctx.warnings.push(`Could not set the text "${from.characters.slice(0, 30)}" on an instance: ${(error as Error).message}`);
+      }
+    }
+    return;
+  }
+  if (from.type === "RECTANGLE" && to.type === "RECTANGLE") {
+    const paints = from.fills;
+    if (Array.isArray(paints) && paints.some((p: Paint) => p.type === "IMAGE")) to.fills = paints;
+  }
+  if ("children" in from && "children" in to) {
+    const kids = (to as ChildrenMixin).children;
+    (from as ChildrenMixin).children.forEach((child, i) => {
+      if (kids[i]) carryOverrides(child, kids[i], ctx);
+    });
+  }
+}
+
+/**
  * Turn a layer by the CSS angle, around its centre as CSS does.
  *
  * The IR gives the upright box placed with its centre where the rotated box's
@@ -1110,7 +1243,7 @@ function applyChildSizing(
     // elsewhere throws, so fall back to the measured size.
     const canHug =
       child.type === "TEXT" ||
-      (child.type === "FRAME" && (child as FrameNode).layoutMode !== "NONE");
+      ((child.type === "FRAME" || child.type === "COMPONENT" || child.type === "INSTANCE") && (child as FrameNode).layoutMode !== "NONE");
 
     try {
       child.layoutSizingHorizontal =

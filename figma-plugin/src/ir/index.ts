@@ -207,6 +207,12 @@ export type IRNode = {
    * option text keeps flowing and centring on the same axis.
    */
   absolute?: boolean;
+  /**
+   * One of a set of layers that are the same thing drawn more than once
+   * (src/ui/components.ts). The first becomes the main component, in place;
+   * the rest become its instances, carrying their own text and images.
+   */
+  component?: { key: string; name: string; main: boolean };
 
   fills: IRPaint[];
   border?: IRBorder;
@@ -552,6 +558,8 @@ export type ExtractOptions = {
   bindTokens: boolean;
   /** Infer auto-layout for normal-flow stacks, not just explicit flex/grid. */
   inferStacks: boolean;
+  /** Make repeated elements a main component and instances (src/ui/components.ts). */
+  components?: boolean;
   /** Rasterise elements we cannot faithfully convert instead of dropping them. */
   rasterizeUnsupported: boolean;
   /**

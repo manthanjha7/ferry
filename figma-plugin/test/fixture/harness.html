@@ -1349,6 +1349,15 @@
             JSON.stringify({ pad: al?.layout?.padding, w: al?.border?.weights, row: L("Accent row")?.x }),
           );
         }
+        {
+          const row = L("Stat cards");
+          const marks = (row?.children || []).map((c) => c.component && [c.component.name, c.component.main, c.component.key]);
+          check(
+            "three identical stat cards are one component (first is main); a wider one is not",
+            !!marks[0] && marks[0][1] === true && marks[1]?.[1] === false && marks[2]?.[1] === false && marks[0][2] === marks[1][2] && marks[1][2] === marks[2][2] && !marks[3] && marks[0][0] === "Stat",
+            JSON.stringify(marks),
+          );
+        }
         const tight = (function f(n) { return n.kind === "TEXT" && n.text.characters.startsWith("Tight leading") ? n : (n.children || []).map(f).find(Boolean) || null; })(lc.root);
         check("a wrapped paragraph whose glyph boxes overlap the next line (tight leading) is still wrapped", tight?.text?.singleLine === false, JSON.stringify(tight && { single: tight.text.singleLine, h: tight.height }));
         check("preconnect links are not reported as missing stylesheets", lc.missingStylesheets.length === 0, JSON.stringify(lc.missingStylesheets));

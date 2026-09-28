@@ -53,7 +53,7 @@ for (const name of names) {
     writeFileSync(`${dir}/boxes.txt`, boxes.join("\n"));
     const q = JSON.parse(sh("python3", ["quality.py", `${dir}/tree.json`]));
     writeFileSync(`${dir}/quality.json`, JSON.stringify(q, null, 1));
-    row.quality = `layers ${q.layers}, auto-layout ${q.auto_layout_frames}/${q.frames}, generic ${q.generic_names}, bound ${q.bound_fills}/${q.fills}, empty ${q.empty_frames}, invisible ${q.invisible}`;
+    row.quality = `layers ${q.layers}, auto-layout ${q.auto_layout_frames}/${q.frames}, generic ${q.generic_names}, bound ${q.bound_fills}/${q.fills}, empty ${q.empty_frames}, invisible ${q.invisible}, components ${q.components}/${q.instances}`;
   } catch (e) {
     row.error = String(e.message).split("\n").slice(0, 3).join(" | ").slice(0, 300);
   }
