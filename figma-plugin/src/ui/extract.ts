@@ -482,23 +482,45 @@ function preferReducedMotion(rules: CSSRuleList | null | undefined): void {
 
 /** The rotation in a computed transform, in degrees clockwise. 0 when there is none worth carrying. */
 function rotationOf(style: CSSStyleDeclaration): number {
+  let degrees = 0;
   const t = style.transform;
-  if (!t || t === "none") return 0;
-  const m = /^matrix\(([^)]+)\)$/.exec(t);
-  if (!m) return 0; // matrix3d: a 3D turn has no Figma equivalent; measured flat.
-  const [a, b] = m[1].split(",").map((v) => parseFloat(v));
-  const degrees = (Math.atan2(b, a) * 180) / Math.PI;
+  if (t && t !== "none") {
+    const m = /^matrix\(([^)]+)\)$/.exec(t);
+    // matrix3d: a 3D turn has no Figma equivalent; measured flat.
+    if (m) {
+      const [a, b] = m[1].split(",").map((v) => parseFloat(v));
+      degrees += (Math.atan2(b, a) * 180) / Math.PI;
+    }
+  }
+  // The standalone `rotate` property (`rotate: 1.4deg`) turns the box too and
+  // is not part of `transform`: a tilted photo card came in upright.
+  const r = (style as CSSStyleDeclaration & { rotate?: string }).rotate;
+  if (r && r !== "none") {
+    const m = /(-?[\d.]+)(deg|rad|turn|grad)\s*$/.exec(r);
+    const axis = r.trim().split(/\s+/);
+    const zOnly = axis.length === 1 || /^z$/i.test(axis[0]) || (axis.length === 4 && parseFloat(axis[0]) === 0 && parseFloat(axis[1]) === 0);
+    if (m && zOnly) {
+      const n = parseFloat(m[1]);
+      degrees += m[2] === "rad" ? (n * 180) / Math.PI : m[2] === "turn" ? n * 360 : m[2] === "grad" ? n * 0.9 : n;
+    }
+  }
+  degrees = ((degrees + 540) % 360) - 180;
   return Math.abs(degrees) < 0.05 ? 0 : Math.round(degrees * 100) / 100;
 }
 
 /** Turn an element's transform off for measuring, and hand back how to turn it on. */
 function suspendTransform(el: HTMLElement): () => void {
-  const value = el.style.getPropertyValue("transform");
-  const priority = el.style.getPropertyPriority("transform");
-  el.style.setProperty("transform", "none", "important");
+  const saved = ["transform", "rotate"].map((prop) => ({
+    prop,
+    value: el.style.getPropertyValue(prop),
+    priority: el.style.getPropertyPriority(prop),
+  }));
+  for (const { prop } of saved) el.style.setProperty(prop, "none", "important");
   return () => {
-    if (value) el.style.setProperty("transform", value, priority);
-    else el.style.removeProperty("transform");
+    for (const { prop, value, priority } of saved) {
+      if (value) el.style.setProperty(prop, value, priority);
+      else el.style.removeProperty(prop);
+    }
   };
 }
 
@@ -1189,21 +1211,37 @@ function stubImageSlots(parsed: Document): number {
             ? (slot.getAttribute("radius") ?? "8px")
             : "0";
 
+    // Drawn the way Claude Design's own image-slot.js draws an empty slot: a
+    // block that fills its container (3:2 unless sized), a faint grey fill, a
+    // dashed ring in the text colour at 35%, and a centred image icon over
+    // the placeholder caption at 75%. An empty dashed box told a designer
+    // nothing about what goes there.
+    const caption = slot.getAttribute("placeholder") ?? "Drop an image";
     const box = parsed.createElement("div");
-    box.setAttribute("data-name", slot.getAttribute("placeholder") ?? "Image slot");
+    box.setAttribute("data-name", caption);
     box.setAttribute(
       "style",
       [
-        slot.getAttribute("style") ?? "",
-        "display:inline-block",
+        "display:flex",
+        "flex-direction:column",
+        "align-items:center",
+        "justify-content:center",
+        "gap:6px",
+        "position:relative",
+        "width:100%",
+        "height:100%",
+        "aspect-ratio:3/2",
+        "box-sizing:border-box",
+        "font:13px/1.3 system-ui,-apple-system,sans-serif",
+        "background:rgba(127,127,127,.08)",
+        "border:1.5px dashed color-mix(in srgb, currentColor 35%, transparent)",
         `border-radius:${radius}`,
-        // Dashed, like the x-import stubs, so it reads as a deliberate slot
-        // rather than a box someone forgot to fill.
-        "border:1px dashed rgba(0,0,0,.35)",
+        slot.getAttribute("style") ?? "",
       ].join(";"),
     );
-
-    while (slot.firstChild) box.appendChild(slot.firstChild);
+    box.innerHTML =
+      '<svg data-name="Image icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="opacity:.75"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></svg>' +
+      `<span data-name="Caption" style="opacity:.75">${caption.replace(/[<&]/g, (c) => (c === "<" ? "&lt;" : "&amp;"))}</span>`;
     slot.replaceWith(box);
   }
 
@@ -2262,6 +2300,25 @@ async function walkMeasured(
       const boxHugsItsText =
         contentRect.width > 0 && innerWidth - contentRect.width <= HUG_SLACK;
 
+      // Where the text actually sits in the box, on each axis: a 40px round
+      // icon button (`display: grid; place-items: center`) put its arrow
+      // top-left because only text-align was read. Measured, the way the
+      // browser placed it, whatever CSS did the placing.
+      const inner = {
+        left: rect.left + borderBox.left + padding.left,
+        right: rect.right - borderBox.right - padding.right,
+        top: rect.top + borderBox.top + padding.top,
+        bottom: rect.bottom - borderBox.bottom - padding.bottom,
+      };
+      const placed = (start: number, end: number): "MIN" | "CENTER" | "MAX" | null => {
+        if (contentRect.width <= 0) return null;
+        if (start > 1 && Math.abs(start - end) <= 1.5) return "CENTER";
+        if (start > 1 && end <= 1) return "MAX";
+        return null;
+      };
+      const across = placed(contentRect.left - inner.left, inner.right - contentRect.right);
+      const down = placed(contentRect.top - inner.top, inner.bottom - contentRect.bottom);
+
       return {
         kind: "FRAME",
         name: frameName(el, undefined, style, base),
@@ -2273,15 +2330,16 @@ async function walkMeasured(
           wrap: false,
           padding,
           paddingTokens: paddingTokens(el, ctx, padding),
-          primaryAlign: "MIN",
+          primaryAlign: down ?? "MIN",
           // Centre-aligned copy in the source must stay centred once the box
           // hugs, otherwise every chip label drifts left.
           crossAlign:
-            text.align === "CENTER"
+            across ??
+            (text.align === "CENTER"
               ? "CENTER"
               : text.align === "RIGHT"
                 ? "MAX"
-                : "MIN",
+                : "MIN"),
           source: "inferred-stack",
           hugContent: text.singleLine && boxHugsItsText,
         },
@@ -3247,10 +3305,11 @@ function extractText(
   const contents = document.createRange();
   contents.selectNodeContents(el);
   const box = contents.getBoundingClientRect();
+  const presented = asTextPresentation(characters, trimmed);
 
   return {
-    characters,
-    runs: trimmed,
+    characters: presented.characters,
+    runs: presented.runs,
     align: mapTextAlign(style.textAlign),
     verticalAlign: "TOP",
     // Lines counted, not guessed from height: a display face set tight
@@ -3260,14 +3319,55 @@ function extractText(
   };
 }
 
-/** Distinct line boxes a range's text occupies. */
+/**
+ * Symbols whose default presentation is text, but which Figma's font fallback
+ * draws with Apple Color Emoji: "✳" came in as a green emoji tile where Chrome
+ * drew a text glyph in the accent colour. A text-presentation selector
+ * (U+FE0E) after each keeps them text. Symbols that are emoji by default
+ * everywhere (⭐ ✅) are left alone, since Chrome draws those as emoji too.
+ */
+const EMOJI_CAPABLE = /[\u00A9\u00AE\u203C\u2049\u2122\u2139\u2194-\u2199\u21A9\u21AA\u231A\u231B\u2328\u23CF\u23E9-\u23F3\u23F8-\u23FA\u24C2\u25AA\u25AB\u25B6\u25C0\u25FB-\u25FE\u2600-\u27BF\u2934\u2935\u2B05-\u2B07\u2B1B\u2B1C\u2B50\u2B55\u3030\u303D\u3297\u3299]/;
+const EMOJI_BY_DEFAULT = new Set(
+  "⌚⌛⏩⏪⏫⏬⏰⏳◽◾☔☕♈♉♊♋♌♍♎♏♐♑♒♓♿⚓⚡⚪⚫⚽⚾⛄⛅⛎⛔⛪⛲⛳⛵⛺⛽✅✊✋✨❌❎❓❔❕❗➕➖➗➰➿⬛⬜⭐⭕",
+);
+
+function asTextPresentation(characters: string, runs: IRTextRun[]): { characters: string; runs: IRTextRun[] } {
+  if (!EMOJI_CAPABLE.test(characters)) return { characters, runs };
+  let out = "";
+  const shift: number[] = [];
+  for (let i = 0; i < characters.length; i++) {
+    shift.push(out.length);
+    const ch = characters[i];
+    out += ch;
+    const next = characters[i + 1];
+    if (EMOJI_CAPABLE.test(ch) && !EMOJI_BY_DEFAULT.has(ch) && next !== "\uFE0F" && next !== "\uFE0E") out += "\uFE0E";
+  }
+  shift.push(out.length);
+  return {
+    characters: out,
+    runs: runs.map((run) => ({ ...run, start: shift[run.start] ?? out.length, end: shift[run.end] ?? out.length })),
+  };
+}
+
+/**
+ * Distinct line boxes a range's text occupies: glyph boxes that overlap
+ * vertically share a line. By top edge alone, a 26px "/10" set on the
+ * baseline of a 46px "3" starts lower and read as a second line, and the
+ * text was given a wrapping box that broke it in two.
+ */
 function countLines(range: Range): number {
-  const tops: number[] = [];
+  const bands: Array<{ top: number; bottom: number }> = [];
   for (const rect of Array.from(range.getClientRects())) {
     if (rect.width < 0.5 || rect.height < 0.5) continue;
-    if (!tops.some((top) => Math.abs(top - rect.top) < rect.height / 2)) tops.push(rect.top);
+    const band = bands.find((b) => rect.top < b.bottom - 1 && b.top < rect.bottom - 1);
+    if (band) {
+      band.top = Math.min(band.top, rect.top);
+      band.bottom = Math.max(band.bottom, rect.bottom);
+    } else {
+      bands.push({ top: rect.top, bottom: rect.bottom });
+    }
   }
-  return Math.max(1, tops.length);
+  return Math.max(1, bands.length);
 }
 
 function makeRun(
@@ -4179,7 +4279,8 @@ function clampOpacity(value: string): number {
 }
 
 function truncate(value: string, max: number): string {
-  const clean = value.replace(/\s+/g, " ").trim();
+  // Layer names are read, not rendered: no invisible presentation selectors.
+  const clean = value.replace(/[\uFE0E\uFE0F]/g, "").replace(/\s+/g, " ").trim();
   return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
 }
 

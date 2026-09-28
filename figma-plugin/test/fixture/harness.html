@@ -1029,7 +1029,7 @@
           { viewportWidth: 1440 },
         );
         const byText = (node, chars) =>
-          node.kind === "TEXT" && node.text?.characters === chars
+          node.kind === "TEXT" && node.text?.characters.replace(/\uFE0E/g, "") === chars
             ? node
             : (node.children || []).map((c) => byText(c, chars)).find(Boolean) || null;
         const sn = (name) => findByName(stress.root, name);
@@ -1247,6 +1247,32 @@
         const arrow = L("Arrow link");
         const lead = arrow?.children?.find((c) => c.kind === "TEXT");
         check("the space before an inline arrow survives (\"work \u2193\", not \"work\u2193\")", lead?.text?.characters === "Explore my work ", JSON.stringify(lead?.text?.characters));
+        const score = (function f(n) { return n.kind === "TEXT" && n.text.characters === "3/10" ? n : (n.children || []).map(f).find(Boolean) || null; })(lc.root);
+        check("a big number with a smaller \"/10\" on its baseline is still one line", score?.text?.singleLine === true, JSON.stringify(score?.text && { single: score.text.singleLine, h: score.height }));
+        check(
+          "text centred by grid place-items in a round button stays centred",
+          L("Round button")?.layout?.primaryAlign === "CENTER" && L("Round button")?.layout?.crossAlign === "CENTER",
+          JSON.stringify(L("Round button")?.layout && { p: L("Round button").layout.primaryAlign, c: L("Round button").layout.crossAlign }),
+        );
+        check("the standalone rotate property is carried like transform: rotate()", L("Tilted card")?.rotation === 1.4 && L("Tilted card")?.width === 120, JSON.stringify({ r: L("Tilted card")?.rotation, w: L("Tilted card")?.width }));
+        {
+          const slot = L("Drop your hero photo");
+          const caption = slot && (function f(n) { return n.kind === "TEXT" ? n : (n.children || []).map(f).find(Boolean) || null; })(slot);
+          check(
+            "an empty image-slot shows Claude Design's own placeholder: icon and caption, filling its box",
+            caption?.text?.characters === "Drop your hero photo" && slot.width === 200 &&
+              !!(function f(n) { return n.kind === "VECTOR" || (n.children || []).some(f); })(slot),
+            JSON.stringify({ w: slot?.width, caption: caption?.text?.characters, kids: slot?.children?.map((c) => c.kind) }),
+          );
+        }
+        {
+          const logo = (function f(n) { return n.kind === "TEXT" && n.text.characters.startsWith("mj") ? n : (n.children || []).map(f).find(Boolean) || null; })(lc.root);
+          check(
+            "a text-default symbol (\u2733) is kept as text in Figma, not an emoji tile, and its name stays clean",
+            logo?.text?.characters === "mj\u2733\uFE0E" && logo.name === "mj\u2733" && logo.text.runs[1]?.start === 2 && logo.text.runs[1]?.end === 4,
+            JSON.stringify({ chars: logo?.text?.characters, name: logo?.name, runs: logo?.text?.runs?.map((r) => [r.start, r.end]) }),
+          );
+        }
         check("a page frame is the design width and at least one screen tall", lc.root.width === 1440 && lc.root.height >= 900, `${lc.root.width}x${lc.root.height}`);
         {
           const plain = await window.extractDocument("<!DOCTYPE html><html><body><div data-name='Box' style='width:50px;height:50px;background:#000'></div></body></html>", "Plain", { viewportWidth: 400 });
