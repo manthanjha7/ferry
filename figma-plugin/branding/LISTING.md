@@ -25,7 +25,7 @@ Drop a Claude Design export into Ferry and it lands in Figma as native layers yo
 
 When the design uses a design system, Ferry keeps it. Your tokens arrive as Figma **variables** under their own names (`--primary` stays an alias of `--green-700`, not a hex it guessed), and a light/dark theme becomes a pair of variable **modes** you can switch on any frame. A document's declared states come in as frames wired into a clickable prototype.
 
-It runs locally inside Figma: no server, no account, no network access. Your files never leave your machine.
+It runs locally inside Figma: no server, no account. The only thing it downloads is the Google Fonts your design links, so text comes in at its real size. Your files never leave your machine.
 
 What it does not do yet: turn repeated elements into components, bind text to text styles, or import CSS background images. Those arrive as plain layers.
 
@@ -41,4 +41,4 @@ claude design, html to figma, import, design system, variables, design tokens, v
 - Keep the non-affiliation line in the description (above). It is the reason a
   "Claude Design" reference in the title is safe nominative use rather than an
   implied endorsement.
-- `networkAccess` is `none`, which is the fastest possible review.
+- `networkAccess` allows only `fonts.googleapis.com` and `fonts.gstatic.com`, with the reasoning shown on the listing.

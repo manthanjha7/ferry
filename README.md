@@ -4,7 +4,7 @@ A Figma plugin that imports Claude Design screens as editable layers, with your
 design tokens mapped onto **your existing Figma variables** rather than baked in
 as hex literals.
 
-Runs locally inside Figma. No server, no account, no network access at all.
+Runs locally inside Figma. No server, no account. Its only network access is the Google Fonts a design links, so text is measured in its real font; nothing about the design leaves your machine.
 
 > Not affiliated with Anthropic or Figma. "Claude Design" is used only to
 > describe what this imports.
@@ -176,8 +176,7 @@ Figma: **Plugins → Development → Import plugin from manifest…** and pick
       tagline and description in `branding/LISTING.md`.
 - [x] Keep the non-affiliation line in the listing as well as in the UI. Carried
       in `branding/LISTING.md`.
-- [x] `networkAccess` is `none`. Left that way; it is both true and the easiest
-      possible review.
+- [x] `networkAccess` allows `fonts.googleapis.com` and `fonts.gstatic.com` only, with the reason stated. Measured in a real Figma panel: under `none`, a design's Google Fonts never load, so its text was measured in a fallback face and re-wrapped in Figma.
 - [ ] Publish: Figma desktop → Plugins → Development → Ferry → Publish, upload
       the two assets, paste the copy, submit for review. (Manual, one-time.)
 

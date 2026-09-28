@@ -532,6 +532,11 @@ export type MappingReport = {
 
 export type ExtractOptions = {
   viewportWidth: number;
+  /**
+   * Minimum frame height for a page. Absent means one viewport (the design
+   * width at 16:10); a $preview state renders at its declared height.
+   */
+  previewHeight?: number;
   /** Bind matched values to Figma Variables instead of baking literals. */
   bindTokens: boolean;
   /** Infer auto-layout for normal-flow stacks, not just explicit flex/grid. */

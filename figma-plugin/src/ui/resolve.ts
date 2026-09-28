@@ -1022,7 +1022,11 @@ function resolveNode(node: Node, scope: Scope, report: ResolveReport, dc: DcImpo
   }
 
   const el = node as Element;
-  const tag = el.tagName;
+  // Upper-cased: inside an <svg> the parser makes `<template data-sc-for>` an
+  // SVG element whose tagName is lowercase "template", and a case-sensitive
+  // check skipped every loop in a chart. Gridlines, data points and axis
+  // labels all went missing, and the leftover blocks read as a failed resolve.
+  const tag = el.tagName.toUpperCase();
 
   // Before SKIP_TAGS and before `resolveAttributes`, in that order and for
   // two different reasons. Before SKIP_TAGS so a future entry there can never

@@ -61,6 +61,10 @@ async function saveDesignSystem(css: string, fileCount: number): Promise<void> {
 }
 
 figma.ui.onmessage = async (message: UIMessage) => {
+  if (typeof __SELFTEST__ !== "undefined" && __SELFTEST__ && (message as { type: string }).type.startsWith("selftest-")) {
+    await selftest(message as unknown as { type: string; scale?: number });
+    return;
+  }
   switch (message.type) {
     case "cancel":
       figma.closePlugin();
@@ -173,6 +177,70 @@ async function runImport(
   } catch (error) {
     post({ type: "import-failed", message: describeError(error) });
     figma.notify("Import failed. See the panel for details.", { error: true });
+  }
+}
+
+/**
+ * Test-driver hooks, compiled only into the `--selftest` build. The driver
+ * clears the page, runs an import through the real panel, then asks for what
+ * Figma actually rendered, as PNG, and for the layer tree.
+ */
+async function selftest(message: { type: string; scale?: number }): Promise<void> {
+  const reply = (payload: Record<string, unknown>) => figma.ui.postMessage({ selftest: true, ...payload });
+  try {
+    if (message.type === "selftest-clear") {
+      for (const node of [...figma.currentPage.children]) node.remove();
+      reply({ type: "selftest-cleared" });
+      return;
+    }
+    const tops = figma.currentPage.children.filter((n) => n.type === "FRAME" || n.type === "SECTION") as SceneNode[];
+    const frames: FrameNode[] = [];
+    for (const top of tops) {
+      if (top.type === "SECTION") frames.push(...(top.children.filter((c) => c.type === "FRAME") as FrameNode[]));
+      else frames.push(top as FrameNode);
+    }
+    if (message.type === "selftest-export") {
+      const out = [];
+      for (const frame of frames) {
+        const bytes = await frame.exportAsync({ format: "PNG", constraint: { type: "SCALE", value: message.scale ?? 1 } });
+        out.push({ name: frame.name, width: frame.width, height: frame.height, png: figma.base64Encode(bytes) });
+      }
+      reply({ type: "selftest-png", frames: out });
+      return;
+    }
+    if (message.type === "selftest-tree") {
+      const dump = (node: SceneNode): Record<string, unknown> => {
+        const n = node as SceneNode & Record<string, unknown>;
+        const base: Record<string, unknown> = {
+          type: node.type, name: node.name, x: Math.round(node.x * 10) / 10, y: Math.round(node.y * 10) / 10,
+          w: Math.round(node.width * 10) / 10, h: Math.round(node.height * 10) / 10,
+        };
+        if ("rotation" in n && n.rotation) base.rotation = n.rotation;
+        if ("opacity" in n && n.opacity !== 1) base.opacity = n.opacity;
+        if (node.type === "TEXT") {
+          base.characters = node.characters;
+          base.font = node.fontName === figma.mixed ? "mixed" : `${(node.fontName as FontName).family} ${(node.fontName as FontName).style}`;
+          base.size = node.fontSize === figma.mixed ? "mixed" : node.fontSize;
+          if (node.textTruncation !== "DISABLED") base.truncation = `${node.textTruncation}/${node.maxLines}`;
+        }
+        if ("fills" in n && Array.isArray(n.fills) && (n.fills as Paint[]).length) {
+          base.fills = (n.fills as Paint[]).map((p) => p.type + ((p as SolidPaint).boundVariables?.color ? "*" : ""));
+        }
+        if ("layoutMode" in n && n.layoutMode !== "NONE") base.layout = n.layoutMode;
+        if ("children" in node) base.children = (node as FrameNode).children.map(dump);
+        return base;
+      };
+      const collections = await figma.variables.getLocalVariableCollectionsAsync();
+      reply({
+        type: "selftest-tree",
+        frames: frames.map(dump),
+        collections: collections.map((c) => ({ name: c.name, modes: c.modes.map((m) => m.name), count: c.variableIds.length })),
+        reactions: frames.map((f) => ({ name: f.name, reactions: f.reactions.map((r) => ({ trigger: r.trigger?.type, timeout: (r.trigger as { timeout?: number })?.timeout, transition: r.actions?.[0] && (r.actions[0] as { transition?: { type: string } | null }).transition?.type })) })),
+      });
+      return;
+    }
+  } catch (error) {
+    reply({ type: "selftest-error", message: String((error as Error)?.message ?? error) });
   }
 }
 

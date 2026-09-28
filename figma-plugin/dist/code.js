@@ -1457,7 +1457,11 @@
     }
     if (spec.glyphFill) {
       const glyph = toFigmaPaint(spec.glyphFill, ctx);
-      if (glyph) text.fills = [glyph];
+      if (glyph) {
+        text.textAutoResize = "HEIGHT";
+        text.resize(Math.max(node.width, 1), Math.max(node.height, 1));
+        text.fills = [glyph];
+      }
     }
     applyEffects(text, node);
     applyBlend(text, node);
@@ -1720,6 +1724,10 @@
     }
   }
   figma.ui.onmessage = async (message) => {
+    if (false) {
+      await selftest(message);
+      return;
+    }
     switch (message.type) {
       case "cancel":
         figma.closePlugin();

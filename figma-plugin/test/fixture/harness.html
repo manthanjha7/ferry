@@ -1076,7 +1076,7 @@
         })(stress.root);
         check(
           "a canvas, an SVG image and a lazy image all import as pictures, with no read failures",
-          images.some((n) => n.name === "Canvas") &&
+          images.some((n) => n.name === "Chart canvas") &&
             images.some((n) => n.name === "Lazy image" || /svg/.test(n.name)) &&
             !stress.warnings.some((w) => w.startsWith("Could not read image")),
           `images=${JSON.stringify(images.map((n) => n.name))} warnings=${JSON.stringify(stress.warnings)}`,
@@ -1193,6 +1193,15 @@
           await window
             .extractAnimationScenes(miniHtml, "Mini", { viewportWidth: 1440 })
             .then(() => false, (e) => /mini-engine\.jsx/.test(String(e?.message))),
+        );
+
+        // --- Loops inside an <svg> (test/fixture/svg-loop.dc.html) -------------
+        const svgLoop = await window.extractDocument(await (await fetch("svg-loop.dc.html")).text(), "SVG loop", { viewportWidth: 400 });
+        const chart = (function f(n) { return n.kind === "VECTOR" ? n : (n.children || []).map(f).find(Boolean) || null; })(svgLoop.root);
+        check(
+          "an sc-for inside an <svg> expands (a chart keeps its data points) and is not counted as unresolved",
+          (chart?.svg.match(/<circle/g) || []).length === 4 && svgLoop.dynamicContent.loops === 0,
+          `circles=${(chart?.svg.match(/<circle/g) || []).length} loops=${svgLoop.dynamicContent.loops}`,
         );
 
         // --- Two screens of one export that disagree (divergent-a/b.html) ------
@@ -2316,7 +2325,9 @@
         })(glueDoc.root);
         check(
           "separate components in a row are never glued into one name",
-          glueNames.includes("Frame") &&
+          // The unglued fallback: a box of separate things with no layout is
+          // a group, Figma's own word for it.
+          glueNames.includes("Group") &&
             !glueNames.some((n) => n.includes("My Searches") && n.includes("Set Alert")),
           JSON.stringify(glueNames),
         );

@@ -130,6 +130,8 @@ export type RenderHandle = {
   dynamicContent: IRDocument["dynamicContent"];
   /** Present when the document is a Claude Design animation, rendered live. */
   animation?: LiveAnimation;
+  /** The stand-in for the page's <body>, whose children are the top-level layers. */
+  body?: HTMLElement;
   dispose: () => void;
 };
 
@@ -235,7 +237,14 @@ export async function mountDocument(
   }
 
   const source = parsed.querySelector("x-dc") ?? parsed.body;
-  container.innerHTML = source.innerHTML;
+  // The page's own <body>: a wrapper that takes the body's margin and padding
+  // once the CSS is in (applyBodyBox), so content sits where the browser puts
+  // it. Without it every element on a page with the default 8px body margin
+  // imported 8px up and to the left.
+  const body = document.createElement("div");
+  body.setAttribute("data-cd2f-body", "");
+  body.innerHTML = source.innerHTML;
+  container.appendChild(body);
   document.body.appendChild(container);
 
   // Token extraction reads `document.styleSheets`, so the design system's CSS
@@ -243,6 +252,10 @@ export async function mountDocument(
   // colour resolves as a bare literal and the whole binding feature no-ops.
   await waitForStylesheets(adopted);
   emulateViewport(container, adopted, viewport);
+  // Claude Design's runtime (support.js) resets `html, body { margin: 0 }`,
+  // so its documents start at 0; plain HTML gets the browser's 8px.
+  const claudeDesign = !!parsed.querySelector("x-dc") || /<x-dc\b|src=["'][^"']*support\.js/i.test(html);
+  applyBodyBox(body, adopted, parsed.body, claudeDesign ? "0px" : "8px");
 
   // An animation project renders from its own .jsx modules, live. Its
   // composition surface, not the page, is what gets measured.
@@ -264,12 +277,14 @@ export async function mountDocument(
   await waitForAssets(container);
   await settleMotion(container, adopted, reveal.flush, clock);
   materializePseudoElements(container);
+  anchorFixedToViewport(container, viewport);
 
   return {
     container,
     // For an animation, the foreignObject holding the composition surface, so
     // the walk's one child is the composition frame at its authored size.
     root: animation ? (animation.surface.parentElement as unknown as HTMLElement) : container,
+    body: animation ? undefined : body,
     animation,
     adopted,
     imageSlots,
@@ -754,6 +769,95 @@ function emulateViewport(container: HTMLElement, adopted: Element[], viewport: V
     const text = el.getAttribute("style") ?? "";
     if (/v(w|h|min|max)\b/.test(text)) el.setAttribute("style", toPx(text, viewport));
   }
+}
+
+/**
+ * `position: fixed` means "on the screen", and the screen is the design's first
+ * viewport, as it is in a browser scrolled to the top.
+ *
+ * The stage has `contain: layout`, which makes it the containing block for
+ * fixed descendants, so `bottom: 0` meant the bottom of the whole page: a
+ * floating button or cookie bar landed below the footer. Bottom-anchored boxes
+ * are re-anchored from the top of the first screen, and a box pinned on both
+ * edges (a full-screen overlay) gets one screen's height.
+ */
+function anchorFixedToViewport(container: HTMLElement, viewport: Viewport): void {
+  for (const el of Array.from(container.querySelectorAll<HTMLElement>("*"))) {
+    const cs = getComputedStyle(el);
+    if (cs.position !== "fixed") continue;
+    // getComputedStyle resolves an `auto` offset of a positioned box to px, so
+    // it cannot say which edge the author pinned. Typed OM keeps `auto`.
+    const map = (el as HTMLElement & { computedStyleMap?: () => StylePropertyMapReadOnly }).computedStyleMap?.();
+    const specified = (prop: "top" | "bottom") => {
+      const value = map?.get(prop)?.toString();
+      return value === undefined ? cs[prop] : value;
+    };
+    const top = specified("top");
+    const bottom = specified("bottom");
+    if (bottom === "auto" || bottom === "") continue;
+    const height = el.getBoundingClientRect().height;
+    if (top !== "auto" && top !== "") {
+      el.style.setProperty("height", `${Math.max(0, viewport.height - parseFloat(top) - parseFloat(bottom))}px`, "important");
+    } else {
+      el.style.setProperty("top", `${viewport.height - parseFloat(bottom) - height}px`, "important");
+    }
+    el.style.setProperty("bottom", "auto", "important");
+  }
+}
+
+/**
+ * Give the body stand-in the page's own body margin and padding.
+ *
+ * Read from the page's CSS (rules on `body`, then its inline style), with the
+ * browser's default 8px margin when nothing sets one. The rules cannot be read
+ * off the plugin's real <body>, which carries Ferry's own panel styles.
+ */
+function applyBodyBox(
+  body: HTMLElement,
+  adopted: Element[],
+  parsedBody: HTMLElement | null,
+  defaultMargin: string,
+): void {
+  const box: Record<string, string> = {
+    "margin-top": defaultMargin, "margin-right": defaultMargin, "margin-bottom": defaultMargin, "margin-left": defaultMargin,
+  };
+  const PROPS = [
+    "margin-top", "margin-right", "margin-bottom", "margin-left",
+    "padding-top", "padding-right", "padding-bottom", "padding-left",
+  ];
+  const visit = (rules: CSSRuleList) => {
+    for (const rule of Array.from(rules)) {
+      const media = (rule as CSSMediaRule).media;
+      if (media && media.mediaText === "not all") continue;
+      const style = (rule as CSSStyleRule).style;
+      const selector = (rule as CSSStyleRule).selectorText;
+      if (style && selector && selector.split(",").some((part) => /^(html\s+)?body$/i.test(part.trim()))) {
+        for (const prop of PROPS) {
+          const value = style.getPropertyValue(prop);
+          if (value) box[prop] = value;
+        }
+      }
+      const nested = (rule as CSSGroupingRule).cssRules;
+      if (nested && nested.length > 0) visit(nested);
+    }
+  };
+  for (const node of adopted) {
+    const sheet = (node as HTMLStyleElement | HTMLLinkElement).sheet;
+    if (!sheet) continue;
+    try {
+      visit(sheet.cssRules);
+    } catch {
+      // Cross-origin: a font sheet, no body box in it.
+    }
+  }
+  const inline = parsedBody?.style;
+  if (inline) {
+    for (const prop of PROPS) {
+      const value = inline.getPropertyValue(prop);
+      if (value) box[prop] = value;
+    }
+  }
+  for (const [prop, value] of Object.entries(box)) body.style.setProperty(prop, value);
 }
 
 function rewriteRules(rules: CSSRuleList, viewport: Viewport): void {
@@ -1253,7 +1357,7 @@ async function measureMounted(
       debug(`deck detected: ${deckSlides.length} slides`);
       await walkDeckSlides(deckSlides, handle.root, ctx, children);
     } else {
-      for (const child of Array.from(handle.root.children)) {
+      for (const child of Array.from((handle.body ?? handle.root).children)) {
         debug(`walking <${child.tagName.toLowerCase()}>`);
         const node = await walk(child as HTMLElement, handle.root, ctx);
         if (node) children.push(node);
@@ -1321,7 +1425,25 @@ async function measureMounted(
 
     // Canvas-mode documents place absolutely-positioned boards at large
     // offsets, so the root has to be sized from content, not the viewport.
-    const bounds = contentBounds(children);
+    // A page, by contrast, is a screen at the design width: a small component
+    // on it came in as a 352px frame, which is not what the browser showed.
+    // So a page keeps its origin and is at least the viewport wide; canvases,
+    // decks and animation stages still size to what they hold.
+    const sizedToContent =
+      !!deckSlides || !!handle.animation || /design_doc_mode["']?\s+content=["']canvas/i.test(html);
+    const measured = contentBounds(children);
+    const bounds = sizedToContent
+      ? measured
+      : {
+          x: 0,
+          y: 0,
+          width: Math.max(opts.viewportWidth, measured.x + measured.width),
+          // A page shorter than the screen still fills the screen in the
+          // browser (Claude Design's runtime sets html, body to 100% height),
+          // so its frame is at least one viewport tall. A $preview component
+          // renders at its declared height instead (opts.previewHeight).
+          height: Math.max(opts.previewHeight ?? designViewportHeight(opts.viewportWidth), measured.y + measured.height),
+        };
     for (const child of children) {
       child.x -= bounds.x;
       child.y -= bounds.y;
@@ -1336,7 +1458,8 @@ async function measureMounted(
       height: Math.max(bounds.height, 1),
       opacity: 1,
       rotation: 0,
-      clips: false,
+      // The page is a screen: what overflows it is off-screen in the browser too.
+      clips: true,
       fills: rootBackground(handle, ctx),
       cornerRadius: { tl: 0, tr: 0, br: 0, bl: 0 },
       effects: [],
@@ -1458,6 +1581,7 @@ export async function extractStateMatrix(
       // 1440 default would stretch a 400px-wide panel to the viewport and
       // report a matrix of the wrong shape.
       viewportWidth: preview?.width ?? options.viewportWidth,
+      previewHeight: preview?.height ?? 1,
     });
 
     const sized = previewFrameSize(doc.root, preview);
@@ -1875,7 +1999,7 @@ async function walkMeasured(
     if (bytes) {
       return {
         kind: "IMAGE",
-        name: el.getAttribute("aria-label") || (el.tagName === "CANVAS" ? "Canvas" : "Video"),
+        name: el.getAttribute("data-name") || el.getAttribute("aria-label") || (el.tagName === "CANVAS" ? "Canvas" : "Video"),
         ...base,
         fills: [],
         cornerRadius: cornerRadii(style),
@@ -1902,7 +2026,7 @@ async function walkMeasured(
     const fit = style.objectFit;
     return {
       kind: "IMAGE",
-      name: (el as HTMLImageElement).alt || fileName((el as HTMLImageElement).src) || "Image",
+      name: imageName(el as HTMLImageElement),
       imageScale: fit === "cover" ? "FILL" : fit === "contain" || fit === "scale-down" || fit === "none" ? "FIT" : "CROP",
       ...base,
       fills: [],
@@ -1916,7 +2040,7 @@ async function walkMeasured(
   if (el.tagName === "svg" || el.tagName === "SVG") {
     return {
       kind: "VECTOR",
-      name: el.getAttribute("aria-label") || "Vector",
+      name: vectorName(el, base),
       ...base,
       fills: [],
       cornerRadius: { tl: 0, tr: 0, br: 0, bl: 0 },
@@ -2957,6 +3081,14 @@ function makeRun(
   return run;
 }
 
+/** A picture's layer name: what the author called it, never a data: URL's tail. */
+function imageName(img: HTMLImageElement): string {
+  const named = img.getAttribute("data-name") || img.alt || img.getAttribute("aria-label") || img.title;
+  if (named) return named;
+  if (!img.src.startsWith("data:")) return fileName(img.src) || "Image";
+  return "Image";
+}
+
 function fontStackOf(stack: string): string[] {
   return stack
     .split(",")
@@ -3229,13 +3361,20 @@ function borders(
     bottom: borderWeight(el, style, "Bottom", "bottom"),
     left: borderWeight(el, style, "Left", "left"),
   };
+  // A side painted transparent draws nothing, so it has no width in Figma.
+  // The loading-spinner idiom (`border: 3px solid; border-top-color:
+  // transparent`) took its colour from the transparent top and lost the ring.
+  const sideColor = (side: string) =>
+    parseColor((style as unknown as Record<string, string>)[`border${side}Color`]);
+  for (const [key, side] of [["top", "Top"], ["right", "Right"], ["bottom", "Bottom"], ["left", "Left"]] as const) {
+    if (weights[key] > 0 && (sideColor(side)?.a ?? 1) === 0) weights[key] = 0;
+  }
   if (Object.values(weights).every((w) => w === 0)) return undefined;
 
   // Pick the colour from whichever side actually has a border.
   const side =
     weights.top > 0 ? "Top" : weights.right > 0 ? "Right" : weights.bottom > 0 ? "Bottom" : "Left";
-  const raw = (style as unknown as Record<string, string>)[`border${side}Color`];
-  const color = parseColor(raw) ?? { r: 0, g: 0, b: 0, a: 1 };
+  const color = sideColor(side) ?? { r: 0, g: 0, b: 0, a: 1 };
   if (color.a === 0) return undefined;
 
   const styleName = (style as unknown as Record<string, string>)[`border${side}Style`];
@@ -3582,9 +3721,41 @@ function frameName(
     if (!isPainted(style) && !hasVisibleBorder(style) && style.boxShadow === "none") {
       return "Spacer";
     }
+
+    // The rest of the unnamed empty boxes are shapes, and a shape has a name
+    // a designer would give it.
+    const round = parseFloat(style.borderTopLeftRadius) >= Math.min(box.width, box.height) / 2 - 0.5;
+    if (style.position === "absolute" && box.width > 0 && box.height > 0) {
+      const parent = el.parentElement?.getBoundingClientRect();
+      if (parent && box.width >= parent.width - 1 && box.height >= parent.height - 1) return "Overlay";
+    }
+    if (round && Math.max(box.width, box.height) <= 16) return "Dot";
+    if (box.height <= 12 && box.width >= box.height * 3) return "Bar";
+    if (Math.max(box.width, box.height) <= 24 && isPainted(style)) return "Swatch";
+    if (!isPainted(style) && hasVisibleBorder(style)) return "Outline";
+    if (style.backgroundImage.includes("url(")) return "Image";
+    return round ? "Circle" : "Rectangle";
   }
 
-  return "Frame";
+  // A box of absolutely placed children: a painted one is a card, the rest a
+  // group, which is Figma's own word for children with no layout.
+  if (isPainted(style) || hasVisibleBorder(style) || style.boxShadow !== "none") return "Card";
+  return "Group";
+}
+
+/**
+ * An inline SVG's layer name. "Vector" 27 times over is what a dashboard
+ * imported with; a designer names these by what they are.
+ */
+function vectorName(el: Element, box: { width: number; height: number }): string {
+  const named =
+    el.getAttribute("data-name") || el.getAttribute("aria-label") || el.querySelector("title")?.textContent?.trim();
+  if (named) return named;
+  const labelled = el.closest("button, a, [role=button]");
+  const label = labelled ? (labelled as HTMLElement).innerText?.trim() : "";
+  if (Math.max(box.width, box.height) <= 32) return label && label.length <= 24 ? `${label} icon` : "Icon";
+  if (el.querySelector("text, line, polyline, polygon")) return "Chart";
+  return "Illustration";
 }
 
 /** The kind of control this is, for an <input>/<select>/<textarea>. */

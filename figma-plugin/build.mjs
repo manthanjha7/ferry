@@ -17,11 +17,17 @@ import { fileURLToPath } from "node:url";
 const root = dirname(fileURLToPath(import.meta.url));
 const watch = process.argv.includes("--watch");
 
+// `--selftest` compiles in the sandbox hooks the real-Figma test driver uses
+// (clear the page, export what was built as PNG, dump the layer tree). A normal
+// build defines the flag false and esbuild drops that code entirely.
+const selftest = process.argv.includes("--selftest");
+
 const shared = {
   bundle: true,
   target: "es2017",
   format: "iife",
   logLevel: "info",
+  define: { __SELFTEST__: String(selftest) },
 };
 
 await mkdir(resolve(root, "dist"), { recursive: true });
@@ -45,7 +51,7 @@ const inlineUiPlugin = {
       const stamp = new Date()
         .toISOString()
         .replace("T", " ")
-        .replace(/\.\d+Z$/, "");
+        .replace(/\.\d+Z$/, "") + (selftest ? " selftest" : "");
 
       await writeFile(
         resolve(root, "dist/ui.html"),
@@ -74,7 +80,7 @@ const uiCtx = await esbuild.context({
   // React ships a development build unless told otherwise, at four times the
   // size. Minified because the panel is one inlined HTML file; names kept so
   // a stack trace in a bug report still says where it came from.
-  define: { "process.env.NODE_ENV": '"production"' },
+  define: { "process.env.NODE_ENV": '"production"', __SELFTEST__: String(selftest) },
   minify: true,
   keepNames: true,
 });

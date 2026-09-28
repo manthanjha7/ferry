@@ -1164,10 +1164,17 @@ async function buildText(node: IRNode, ctx: BuildCtx): Promise<TextNode | null> 
     }
   }
 
-  // Gradient text: the glyphs carry the gradient, not a box behind them.
+  // Gradient text: the glyphs carry the gradient, not a box behind them. The
+  // gradient runs across the element's box, not the words, so the box keeps
+  // its measured width: hugging the words squeezed a page-wide red-to-blue
+  // gradient into one word.
   if (spec.glyphFill) {
     const glyph = toFigmaPaint(spec.glyphFill, ctx);
-    if (glyph) text.fills = [glyph];
+    if (glyph) {
+      text.textAutoResize = "HEIGHT";
+      text.resize(Math.max(node.width, 1), Math.max(node.height, 1));
+      text.fills = [glyph];
+    }
   }
 
   applyEffects(text, node);

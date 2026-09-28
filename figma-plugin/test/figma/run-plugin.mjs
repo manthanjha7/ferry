@@ -1,0 +1,20 @@
+import { connectBrowser, evaluate, sleep } from "./cdp.mjs";
+import { press, typeText } from "./keys.mjs";
+/** Run a development plugin by name in the given file tab via Quick Actions. */
+const [prefix, name] = process.argv.slice(2);
+const cdp = await connectBrowser();
+const page = (await cdp.send("Target.getTargets")).targetInfos.find((t) => t.targetId.startsWith(prefix));
+const { sessionId } = await cdp.send("Target.attachToTarget", { targetId: page.targetId, flatten: true });
+await evaluate(cdp, sessionId, "document.querySelector('canvas')?.focus(); true");
+await press(cdp, sessionId, "Slash", 4);
+await sleep(900);
+await typeText(cdp, sessionId, name);
+await sleep(1500);
+await press(cdp, sessionId, "Enter");
+await sleep(5000);
+const { frameTree } = await cdp.send("Page.getFrameTree", {}, sessionId);
+const walk = (n, d = 0) => { console.log("  ".repeat(d) + (n.frame.url || "").slice(0, 90), n.frame.name || ""); (n.childFrames || []).forEach((c) => walk(c, d + 1)); };
+walk(frameTree);
+const all = (await cdp.send("Target.getTargets")).targetInfos.filter((t) => t.type === "iframe");
+console.log("oopif:", all.map((t) => t.url.slice(0, 60)));
+cdp.close();

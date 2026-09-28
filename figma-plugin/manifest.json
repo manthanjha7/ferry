@@ -12,9 +12,10 @@
   ],
   "networkAccess": {
     "allowedDomains": [
-      "none"
+      "https://fonts.googleapis.com",
+      "https://fonts.gstatic.com"
     ],
-    "reasoning": "All files are read locally and inlined as data URIs before extraction. The plugin makes no outbound requests."
+    "reasoning": "Only to load the Google Fonts a design itself links, so its text is measured in the font it was designed in. Nothing about the design is sent anywhere: files are read locally and inlined, and no other request is made."
   },
   "permissions": [
     "teamlibrary"
