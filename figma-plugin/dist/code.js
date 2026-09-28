@@ -1253,11 +1253,14 @@
   }
   async function maybeYield(ctx, label) {
     const now = Date.now();
-    if (now - ctx.lastYield < 120) return;
-    ctx.lastYield = now;
+    if (now - ctx.lastYield < yieldBudget) return;
     ctx.onProgress(ctx.count, ctx.total, label);
     await new Promise((resolve) => setTimeout(resolve, 0));
+    const waited = Date.now() - now;
+    yieldBudget = waited > 400 ? 2e3 : 120;
+    ctx.lastYield = Date.now();
   }
+  var yieldBudget = 120;
   function collectFontRequests(node, out = []) {
     var _a;
     if (node.text) {

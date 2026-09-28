@@ -12,7 +12,7 @@ import json, re, sys
 tree = json.load(open(sys.argv[1]))
 stats = {"layers": 0, "frames": 0, "text": 0, "images": 0, "vectors": 0, "generic_names": [], "absolute_frames_with_children": 0,
          "auto_layout_frames": 0, "empty_frames": 0, "invisible": 0, "bound_fills": 0, "fills": 0, "fonts": {}}
-GENERIC = re.compile(r"^(Frame|Group|Rectangle|Vector|Div|Span|Section|Container|Layer)( \d+)?$", re.I)
+GENERIC = re.compile(r"^(Frame|Rectangle|Vector|Div|Span|Container|Layer)( \d+)?$", re.I)
 def walk(n, depth=0):
     stats["layers"] += 1
     t = n["type"]

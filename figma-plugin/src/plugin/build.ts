@@ -761,11 +761,19 @@ function countNodes(node: IRNode): number {
  */
 async function maybeYield(ctx: BuildCtx, label: string): Promise<void> {
   const now = Date.now();
-  if (now - ctx.lastYield < 120) return;
-  ctx.lastYield = now;
+  if (now - ctx.lastYield < yieldBudget) return;
   ctx.onProgress(ctx.count, ctx.total, label);
   await new Promise((resolve) => setTimeout(resolve, 0));
+  // A window in the background has its timers throttled to about a second,
+  // and at a yield every 120ms that made a 3-second import take minutes when
+  // the designer switched apps. A yield that came back late means nobody is
+  // watching the editor: work in 2-second slices until one comes back fast.
+  const waited = Date.now() - now;
+  yieldBudget = waited > 400 ? 2000 : 120;
+  ctx.lastYield = Date.now();
 }
+
+let yieldBudget = 120;
 
 function collectFontRequests(
   node: IRNode,
