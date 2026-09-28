@@ -15,6 +15,7 @@ import { bootAnimation, readAnimationSpec, settledMoment, type LiveAnimation } f
 import { installVirtualClock, real, SETTLE_HORIZON_MS, type VirtualClock } from "./clock";
 import { markComponents } from "./components";
 import { prepareHover, type HoverPass } from "./hover";
+import { bootPrototype, readPrototypeSpec } from "./prototype";
 
 /** The page, with its repeated elements marked as components. */
 function withComponents(root: IRNode): IRNode {
@@ -135,6 +136,8 @@ export type RenderHandle = {
   root: HTMLElement;
   /** Style/link elements we lifted out of the document into our <head>. */
   adopted: Element[];
+  /** What could not be run while mounting, for the import's warnings. */
+  notes?: string[];
   /** How many <image-slot> placeholders we turned into visible boxes. */
   imageSlots: number;
   /** Stylesheet hrefs the document asked for that did not resolve. */
@@ -215,6 +218,13 @@ export async function mountDocument(
 
   // Claude Design wraps content in <x-dc> with a <helmet> of asset links.
   const adopted: Element[] = [];
+  // Scrollbars are the browser's, not the design's: a scrolling panel that
+  // styles its own (::-webkit-scrollbar { width: 8px }) took 8px from its
+  // content and shifted a centred column 4px. Hidden while measuring.
+  const noScrollbars = document.createElement("style");
+  noScrollbars.textContent = "#cd2f-stage *::-webkit-scrollbar { display: none !important; width: 0 !important; height: 0 !important; } #cd2f-stage, #cd2f-stage * { scrollbar-width: none !important; }";
+  document.head.appendChild(noScrollbars);
+  adopted.push(noScrollbars);
   const adopt = (node: Element) => {
     const clone = node.cloneNode(true) as Element;
     document.head.appendChild(clone);
@@ -289,6 +299,22 @@ export async function mountDocument(
       throw error;
     }
   }
+  // A React prototype renders itself: run its scripts before anything waits
+  // on the images and fonts it puts on the page.
+  const prototypeNotes: string[] = [];
+  if (!animationSpec) {
+    const prototype = readPrototypeSpec(html);
+    if (prototype) {
+      const booted = await bootPrototype(container, prototype, options.moduleSources);
+      prototypeNotes.push(...booted.notes);
+      // Its generated CSS (Tailwind's reset sets the body margin to 0) is the
+      // page's CSS: read the body box and the viewport rules again with it.
+      adopted.push(...booted.added);
+      emulateViewport(container, booted.added, viewport);
+      applyBodyBox(body, adopted, parsed.body, claudeDesign ? "0px" : "8px");
+      debug(`prototype booted: ${prototype.scripts.length} scripts`);
+    }
+  }
   await waitForAssets(container);
   debug("assets loaded");
   await settleMotion(container, adopted, reveal.flush, clock);
@@ -306,6 +332,7 @@ export async function mountDocument(
     adopted,
     imageSlots,
     dynamicContent: detectDynamicContent(parsed, resolveReport),
+    notes: prototypeNotes,
     missingStylesheets: findMissingStylesheets(adopted),
     dispose: () => {
       animation?.unmount();
@@ -1604,6 +1631,7 @@ async function measureMounted(
       themeScope: rootScope ?? null,
       pendingLineHeights: [],
     };
+    ctx.warnings.push(...(handle.notes ?? []));
 
     await prefetchBackgroundImages(handle.root, ctx);
     if (opts.hoverStates !== false && !handle.animation) {

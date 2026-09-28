@@ -232,5 +232,8 @@ if (png.type === "selftest-png") {
 }
 const { data } = await cdp.send("Page.captureScreenshot", { format: "png" }, sessionId);
 writeFileSync(join(outDir, "figma-window.png"), Buffer.from(data, "base64"));
-console.log(JSON.stringify({ took, frames: png.frames?.map((f) => `${f.name} ${Math.round(f.width)}x${Math.round(f.height)}`), error: png.message }));
+// The screen's pixel ratio: layout rounds to device pixels, so a Retina
+// panel measures text on half pixels. The reference has to render the same way.
+const dpr = await run("window.devicePixelRatio");
+console.log(JSON.stringify({ took, dpr, frames: png.frames?.map((f) => `${f.name} ${Math.round(f.width)}x${Math.round(f.height)}`), error: png.message }));
 cdp.close();

@@ -977,10 +977,12 @@
       componentsArea: null
     };
     let root = null;
+    const pageBefore = new Set(figma.currentPage.children.map((n) => n.id));
     try {
       root = await buildNode(doc.root, ctx);
       root.name = doc.name;
       unmakeLoneComponents(ctx);
+      rehomeStrays(pageBefore, root, ctx);
       if (doc.props) root.setPluginData("ferry.props", JSON.stringify(doc.props));
       if (doc.sceneTime !== void 0) root.setPluginData("ferry.sceneTime", String(doc.sceneTime));
       figma.currentPage.appendChild(root);
@@ -1586,10 +1588,27 @@
       y += area.height + 120;
     }
   }
+  function rehomeStrays(before, root, ctx) {
+    for (const node of [...figma.currentPage.children]) {
+      if (before.has(node.id) || node === root || node === ctx.componentsArea) continue;
+      try {
+        componentsArea(ctx).appendChild(node);
+      } catch (e) {
+      }
+    }
+  }
   function unmakeLoneComponents(ctx) {
-    var _a;
-    for (const [key, main] of ctx.components) {
-      if (((_a = ctx.instanceCounts.get(key)) != null ? _a : 0) > 0) continue;
+    const depth = (node) => {
+      let d = 0;
+      for (let p = node.parent; p; p = p.parent) d++;
+      return d;
+    };
+    const lone = Array.from(ctx.components).filter(([key, main]) => {
+      var _a;
+      return ((_a = ctx.instanceCounts.get(key)) != null ? _a : 0) === 0 && !main.removed;
+    }).sort((a, b) => depth(b[1]) - depth(a[1]));
+    for (const [key, main] of lone) {
+      if (main.findOne((n) => n.type === "COMPONENT")) continue;
       const parent = main.parent;
       if (!parent || !("insertChild" in parent)) continue;
       try {

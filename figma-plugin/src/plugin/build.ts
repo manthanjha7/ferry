@@ -137,10 +137,12 @@ export async function buildDocument(
   };
 
   let root: FrameNode | null = null;
+  const pageBefore = new Set(figma.currentPage.children.map((n) => n.id));
   try {
     root = (await buildNode(doc.root, ctx)) as FrameNode;
     root.name = doc.name;
     unmakeLoneComponents(ctx);
+    rehomeStrays(pageBefore, root, ctx);
 
     // Which combination of props this frame is, in a form that survives being
     // renamed. The name carries it too, right up until a designer tidies the
@@ -1262,18 +1264,50 @@ function placeAreas(beside: SceneNode[], areas: FrameNode[]): void {
 }
 
 /**
+ * Whatever this build left on the page beside its own frame (a main
+ * component Figma kept alive when its parent went, say) goes into the
+ * components frame, where mains belong. Nothing is deleted: a stray main may
+ * still have instances.
+ */
+function rehomeStrays(before: Set<string>, root: FrameNode, ctx: BuildCtx): void {
+  for (const node of [...figma.currentPage.children]) {
+    if (before.has(node.id) || node === root || node === ctx.componentsArea) continue;
+    try {
+      componentsArea(ctx).appendChild(node);
+    } catch {
+      // Left where it is; better a stray layer than a lost one.
+    }
+  }
+}
+
+/**
  * A main component whose copies all stayed plain layers is a component of
  * one: noise in the assets panel. It goes back to being a frame (an instance
  * of it, detached, in its place), keeping its place in the layout.
  */
 function unmakeLoneComponents(ctx: BuildCtx): void {
-  for (const [key, main] of ctx.components) {
-    if ((ctx.instanceCounts.get(key) ?? 0) > 0) continue;
+  const depth = (node: BaseNode) => {
+    let d = 0;
+    for (let p = node.parent; p; p = p.parent) d++;
+    return d;
+  };
+  // Innermost first: a lone component inside another is undone before the
+  // outer one is, so the outer one's copy holds plain layers. Undone the other
+  // way, removing the outer main made Figma keep the inner one alive on the
+  // page, as a stray top-level frame.
+  const lone = Array.from(ctx.components)
+    .filter(([key, main]) => (ctx.instanceCounts.get(key) ?? 0) === 0 && !main.removed)
+    .sort((a, b) => depth(b[1]) - depth(a[1]));
+  for (const [key, main] of lone) {
+    // A component still in use inside this one would be orphaned by removing
+    // it; it stays a component of one.
+    if (main.findOne((n) => n.type === "COMPONENT")) continue;
     const parent = main.parent;
     if (!parent || !("insertChild" in parent)) continue;
     try {
       const stand = main.createInstance();
       (parent as ChildrenMixin).insertChild((parent as ChildrenMixin).children.indexOf(main), stand);
+
       const m = main as ComponentNode & { layoutSizingHorizontal: string; layoutSizingVertical: string; layoutGrow: number; layoutPositioning: string };
       const s = stand as InstanceNode & { layoutSizingHorizontal: string; layoutSizingVertical: string; layoutGrow: number; layoutPositioning: string };
       if (m.layoutPositioning === "ABSOLUTE") s.layoutPositioning = "ABSOLUTE";

@@ -21,6 +21,7 @@ const CASES = {
   awadh: { mode: "none" },
   control: { mode: "none" },
   icons: { mode: "none" },
+  asc: { mode: "none", local: true },
   "anim-mini": { mode: "none", anim: true },
   "anim-real": { mode: "none", anim: true, local: true },
 };
@@ -42,7 +43,7 @@ for (const name of names) {
     if (c.anim) {
       // One frame per scene, each against the engine seeked to its second.
       const tree = `${dir}/tree.json`;
-      sh("node", ["reference-anim.mjs", zip, tree, dir]);
+      sh("node", ["reference-anim.mjs", zip, tree, dir, String(bench.dpr ?? 1)]);
       const per = [];
       for (let i = 1; existsSync(`${dir}/reference-${i}.png`); i++) {
         mkdirSync(`${dir}/scene-${i}`, { recursive: true });
@@ -62,7 +63,8 @@ for (const name of names) {
       if (i >= 0) pick = `frame-${i + 1}.png`;
     }
     copyFileSync(`${dir}/${pick}`, `${dir}/figma.png`);
-    sh("node", ["reference.mjs", zip, `${dir}/reference.png`, "1440", c.scheme ?? "light"]);
+    sh("node", ["reference.mjs", zip, `${dir}/reference.png`, "1440", c.scheme ?? "light", String(bench.dpr ?? 1)]);
+    row.dpr = bench.dpr;
     const cmp = JSON.parse(sh("python3", ["compare.py", `${dir}/reference.png`, `${dir}/figma.png`, dir]));
     row.mismatch = cmp.mismatch;
     row.size = `${cmp.ref.join("x")} vs ${cmp.figma.join("x")}`;

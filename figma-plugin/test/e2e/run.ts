@@ -4456,6 +4456,7 @@ async function scenarioY(ready: boolean): Promise<void> {
     `${p} each instance keeps its own words`,
     `${p} a card that differs in shape stays a plain frame`,
     `${p} a component whose only copy could not be an instance goes back to a plain frame`,
+    `${p} nested lone components are undone inside out, leaving nothing stray on the page`,
   ];
   if (!ready) {
     for (const n of names) skip(n, "captured/fixture-screen.json not found");
@@ -4502,6 +4503,24 @@ async function scenarioY(ready: boolean): Promise<void> {
   const kids2 = mock2.serializeTree(mock2.getRootNodes()[0]).children;
   check(names[4], kids2.length === 2 && kids2.every((k: any) => k.type === "FRAME") && kids2[0].name === "Pill",
     JSON.stringify(kids2.map((k: any) => [k.type, k.name, k.x])));
+
+  // A card holding a chip, twice: the chips' words differ in width, so no copy
+  // of either can be an instance, and both mains are undone.
+  const mock3 = freshMock();
+  const doc3 = selectFieldDoc();
+  const cardWith = (label: string, x: number, w: number): IRNode => ({
+    ...plain, kind: "FRAME", name: "Card", x, y: 0, width: 200, height: 80,
+    fills: [{ type: "SOLID", color: { r: 1, g: 1, b: 1, a: 1 } }],
+    children: [pill(label, 10, w)],
+  } as IRNode);
+  doc3.root.children = [cardWith("Go", 0, 20), cardWith("Longer", 220, 60)];
+  markComponents(doc3.root);
+  await buildDocument(doc3, { kind: "none" }, () => {});
+  const tops = mock3.getRootNodes().filter((n: any) => !n.removed);
+  const tree3 = mock3.serializeTree(tops[0]);
+  const types = (n: any): string[] => [n.type, ...(n.children ?? []).flatMap(types)];
+  check(names[5], tops.length === 1 && !types(tree3).includes("COMPONENT") && !types(tree3).includes("INSTANCE"),
+    JSON.stringify({ tops: tops.map((n: any) => n.name), types: types(tree3) }));
 }
 
 async function scenarioZ(ready: boolean): Promise<void> {

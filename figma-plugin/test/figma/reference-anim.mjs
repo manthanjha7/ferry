@@ -14,7 +14,8 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { connect, sleep } from "./cdp.mjs";
 
-const [zip, treePath, outDir] = process.argv.slice(2);
+const [zip, treePath, outDir, dprArg] = process.argv.slice(2);
+const dpr = Number(dprArg || 1);
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const tree = JSON.parse(readFileSync(treePath, "utf8"));
 const scenes = tree.frames.map((f, i) => ({ index: i + 1, at: f.sceneTime, name: f.name })).filter((s) => s.at !== undefined);
@@ -37,7 +38,7 @@ const server = spawn("python3", ["-m", "http.server", String(port), "--bind", "1
 const profile = mkdtempSync(join(tmpdir(), "ferry-anim-chrome-"));
 const chrome = spawn(CHROME, [
   "--headless=new", "--remote-debugging-port=0", `--user-data-dir=${profile}`,
-  "--no-first-run", "--hide-scrollbars", "--window-size=1920,1080", "--force-device-scale-factor=1",
+  "--no-first-run", "--hide-scrollbars", "--window-size=1920,1080", `--force-device-scale-factor=${dpr}`,
 ], { stdio: ["ignore", "ignore", "pipe"] });
 const wsUrl = await new Promise((resolve) => {
   chrome.stderr.on("data", (d) => {
@@ -73,7 +74,7 @@ try {
   // re-applies that inline on every render; a stylesheet rule with
   // !important outranks it. The window is larger than the stage, so nothing
   // around it clips.
-  await cdp.send("Emulation.setDeviceMetricsOverride", { width: authored.w + 200, height: authored.h + 200, deviceScaleFactor: 1, mobile: false }, sessionId);
+  await cdp.send("Emulation.setDeviceMetricsOverride", { width: authored.w + 200, height: authored.h + 200, deviceScaleFactor: dpr, mobile: false }, sessionId);
   await evalIn(`(() => { const s = document.createElement("style"); s.textContent = "svg[data-om-exportable-video-with-duration-secs] { transform: none !important; }"; document.head.appendChild(s); return true; })()`);
   await sleep(500);
   await evalIn("document.fonts.ready.then(() => true)");
@@ -86,7 +87,7 @@ try {
       return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height };
     })()`);
     await sleep(400);
-    const { data } = await cdp.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: true, clip: { ...clip, scale: 1 } }, sessionId);
+    const { data } = await cdp.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: true, clip: { ...clip, scale: 1 / dpr } }, sessionId);
     writeFileSync(join(outDir, `reference-${scene.index}.png`), Buffer.from(data, "base64"));
     console.log(JSON.stringify({ scene: scene.name, at: scene.at, ...clip }));
   }

@@ -223,6 +223,12 @@ async function selftest(message: { type: string; scale?: number; components?: bo
       reply({ type: "selftest-fonts", list: list.length, listMs: t1 - t0, loads });
       return;
     }
+    if (message.type === "selftest-eval") {
+      // Test builds only: inspect the page the way the bench cannot from outside.
+      const fn = new Function("figma", `return (async () => { ${(message as unknown as { code: string }).code} })()`);
+      reply({ type: "selftest-eval", value: JSON.stringify(await fn(figma)) });
+      return;
+    }
     if (message.type === "selftest-clear") {
       for (const node of [...figma.currentPage.children]) node.remove();
       reply({ type: "selftest-cleared" });

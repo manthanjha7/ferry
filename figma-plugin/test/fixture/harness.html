@@ -1411,6 +1411,7 @@
             JSON.stringify({ kinds: dots.map((f) => f.type), centre: dp?.at(20, 20), corner: dp?.at(2, 2) }),
           );
         }
+        check("a panel's own scrollbar does not take width from its content", L("Scroll content")?.width === 300, JSON.stringify({ w: L("Scroll content")?.width }));
         const tight = (function f(n) { return n.kind === "TEXT" && n.text.characters.startsWith("Tight leading") ? n : (n.children || []).map(f).find(Boolean) || null; })(lc.root);
         check("a wrapped paragraph whose glyph boxes overlap the next line (tight leading) is still wrapped", tight?.text?.singleLine === false, JSON.stringify(tight && { single: tight.text.singleLine, h: tight.height }));
         check("preconnect links are not reported as missing stylesheets", lc.missingStylesheets.length === 0, JSON.stringify(lc.missingStylesheets));

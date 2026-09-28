@@ -625,6 +625,16 @@ export function createFigmaMock(options: MockOptions = {}): FigmaMock {
       if (idx >= 0) this.children.splice(idx, 1);
     }
 
+    /** Figma's own: the first descendant (not this node) that matches. */
+    findOne(test: (node: any) => boolean): any {
+      for (const child of this.children) {
+        if (test(child)) return child;
+        const inner = typeof child.findOne === "function" ? child.findOne(test) : null;
+        if (inner) return inner;
+      }
+      return null;
+    }
+
     get reactions(): ReadonlyArray<Reaction> {
       return Object.freeze(deepClone(this._reactions));
     }

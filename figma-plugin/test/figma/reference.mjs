@@ -16,7 +16,10 @@ import { join, basename, dirname, relative } from "node:path";
 import { execFileSync } from "node:child_process";
 import { connect, sleep } from "./cdp.mjs";
 
-const [input, out, widthArg, scheme = "light"] = process.argv.slice(2);
+const [input, out, widthArg, scheme = "light", dprArg] = process.argv.slice(2);
+// Match the pixel ratio Figma measured at (bench reports it): Chrome lays text
+// out on device pixels, and a 2x screen puts lines on half pixels.
+const dpr = Number(dprArg || 1);
 const width = Number(widthArg || 1440);
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
@@ -42,7 +45,7 @@ const server = spawn("python3", ["-m", "http.server", String(port), "--bind", "1
 const profile = mkdtempSync(join(tmpdir(), "ferry-ref-chrome-"));
 const chrome = spawn(CHROME, [
   "--headless=new", "--remote-debugging-port=0", `--user-data-dir=${profile}`,
-  "--no-first-run", "--hide-scrollbars", `--window-size=${width},900`, "--force-device-scale-factor=1",
+  "--no-first-run", "--hide-scrollbars", `--window-size=${width},900`, `--force-device-scale-factor=${dpr}`,
 ], { stdio: ["ignore", "ignore", "pipe"] });
 const wsUrl = await new Promise((resolve) => {
   chrome.stderr.on("data", (d) => {
@@ -54,7 +57,7 @@ try {
   const cdp = await connect(wsUrl);
   const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
   const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
-  await cdp.send("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: false }, sessionId);
+  await cdp.send("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: dpr, mobile: false }, sessionId);
   await cdp.send("Page.enable", {}, sessionId);
   await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: scheme }] }, sessionId);
   await sleep(600);
@@ -107,7 +110,9 @@ try {
   // The page's content, not the viewport: a short page is not 900px of white.
   // At least one screen: the browser paints the page's background across the
   // whole viewport, and Ferry's frame is one viewport tall at minimum too.
-  const full = await evalIn(`Math.ceil(Math.max(900, ...Array.from(document.body.querySelectorAll("*")).map((el) => el.getBoundingClientRect().bottom + scrollY)))`);
+  // Content inside a scrolling or clipping box (an app's sidebar list) is not
+  // part of the page's height: only what the page itself shows is.
+  const full = await evalIn(`Math.ceil(Math.max(900, ...Array.from(document.body.querySelectorAll("*")).filter((el) => { for (let p = el.parentElement; p && p !== document.body && p !== document.documentElement; p = p.parentElement) { const cs = getComputedStyle(p); if (cs.overflowX !== "visible" || cs.overflowY !== "visible") return false; } return true; }).map((el) => el.getBoundingClientRect().bottom + scrollY)))`);
   // Every named element's box, for a per-element diff against Figma's tree.
   const boxes = await evalIn(`JSON.stringify(Array.from(document.querySelectorAll("body *")).filter((el) => el.hasAttribute("data-name") || (/^(H[1-6]|P|LI)$/.test(el.tagName) && el.innerText.trim()) || (el.children.length === 0 && el.innerText && el.innerText.trim() && el.getClientRects().length)).slice(0, 800).map((el) => {
     const cs = getComputedStyle(el);
@@ -127,7 +132,7 @@ try {
   // Keep the 900px viewport (so 100vh stays one screen) and capture past it.
   const { data } = await cdp.send(
     "Page.captureScreenshot",
-    { format: "png", captureBeyondViewport: true, clip: { x: 0, y: 0, width, height: Math.min(full, 16000), scale: 1 } },
+    { format: "png", captureBeyondViewport: true, clip: { x: 0, y: 0, width, height: Math.min(full, 16000), scale: 1 / dpr } },
     sessionId,
   );
   writeFileSync(out, Buffer.from(data, "base64"));
