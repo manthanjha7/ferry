@@ -541,7 +541,10 @@ function keepsItsWidth(el: HTMLElement, style: CSSStyleDeclaration, rect: DOMRec
   if (text.align === "CENTER" || text.align === "RIGHT" || text.align === "JUSTIFIED") return true;
   const parent = el.parentElement ? getComputedStyle(el.parentElement) : null;
   const rowItem = !!parent && /flex/.test(parent.display) && !parent.flexDirection.startsWith("column");
-  return rowItem || /^inline-(block|flex|grid)$/.test(style.display);
+  // A grid item's width is its track: an "01" in an 80px column that hugged
+  // its two characters slid every project card 63px left.
+  const gridItem = !!parent && /grid/.test(parent.display);
+  return rowItem || gridItem || /^inline-(block|flex|grid)$/.test(style.display);
 }
 
 /**
@@ -1281,6 +1284,19 @@ async function waitForStylesheets(nodes: Element[]): Promise<void> {
   ]);
 }
 
+/** Request every font face the mounted text uses, so its download is under way. */
+async function loadUsedFaces(container: HTMLElement): Promise<void> {
+  if (!document.fonts?.load) return;
+  const faces = new Set<string>();
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node && faces.size < 60; node = walker.nextNode()) {
+    if (!node.textContent?.trim() || !node.parentElement) continue;
+    const cs = getComputedStyle(node.parentElement);
+    faces.add(`${cs.fontStyle} ${cs.fontWeight} 16px ${cs.fontFamily}`);
+  }
+  await Promise.all(Array.from(faces).map((font) => document.fonts.load(font).catch(() => [])));
+}
+
 async function waitForAssets(scope: HTMLElement): Promise<void> {
   const images = Array.from(scope.querySelectorAll("img"));
   const pending = images
@@ -1300,9 +1316,16 @@ async function waitForAssets(scope: HTMLElement): Promise<void> {
   // nothing — six seconds of it, on a document with no images at all. Local and
   // inlined faces resolve almost immediately, so a short wait costs them
   // nothing and an unreachable one stops being able to stall the import.
+  //
+  // `fonts.ready` alone is not enough: it resolves at once when no download has
+  // STARTED, and a web font's download only starts once text using it is laid
+  // out. A 148px Instrument Serif name was measured in the fallback serif and
+  // wrapped onto two lines. So every face the page's text uses is requested
+  // explicitly first, and the wait covers those requests (network is allowed
+  // for Google Fonts, so they do arrive, within the budget).
   const fonts = Promise.race([
-    document.fonts?.ready ?? Promise.resolve(),
-    new Promise((resolve) => real.setTimeout(resolve, 1500)),
+    loadUsedFaces(scope).then(() => document.fonts?.ready),
+    new Promise((resolve) => real.setTimeout(resolve, 4000)),
   ]);
 
   // Never let a hung asset block the whole import.
@@ -3187,9 +3210,21 @@ function extractText(
     runs: trimmed,
     align: mapTextAlign(style.textAlign),
     verticalAlign: "TOP",
-    singleLine:
-      !characters.includes("\n") && box.height <= tallestRun * 1.5,
+    // Lines counted, not guessed from height: a display face set tight
+    // (148px at line-height 0.86) has glyph boxes taller than 1.5 lines of its
+    // own line height, and read as wrapped it was given a wrapping box.
+    singleLine: !characters.includes("\n") && (countLines(contents) === 1 || box.height <= tallestRun * 1.5),
   };
+}
+
+/** Distinct line boxes a range's text occupies. */
+function countLines(range: Range): number {
+  const tops: number[] = [];
+  for (const rect of Array.from(range.getClientRects())) {
+    if (rect.width < 0.5 || rect.height < 0.5) continue;
+    if (!tops.some((top) => Math.abs(top - rect.top) < rect.height / 2)) tops.push(rect.top);
+  }
+  return Math.max(1, tops.length);
 }
 
 function makeRun(

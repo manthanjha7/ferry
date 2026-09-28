@@ -26,14 +26,14 @@ def walk(n, ox=0, oy=0, top=False):
     entry = {"x": round(bx, 1), "y": round(by, 1), "w": round(bw, 1), "h": round(bh, 1), "type": n["type"]}
     figma.setdefault(n["name"], []).append(entry)
     if n["type"] == "TEXT":
-        figma.setdefault("text:" + " ".join(n.get("characters", "").split()), []).append(entry)
+        figma.setdefault("text:" + " ".join(n.get("characters", "").split()).lower(), []).append(entry)
     for c in n.get("children", []):
         walk(c, x, y)
 for f in tree["frames"]:
     walk(f, top=True)
 bad = 0
 for b in ref:
-    cands = (figma.get(b["name"]) if b["name"] else None) or (figma.get("text:" + b["text"]) if b.get("text") else None)
+    cands = (figma.get(b["name"]) if b["name"] else None) or (figma.get("text:" + " ".join(b["text"].split()).lower()) if b.get("text") else None)
     if not cands:
         print(f"MISSING  {b['name'] or 'text:' + (b.get('text') or '')[:40]}")
         bad += 1
@@ -51,7 +51,7 @@ for b in ref:
         kind = "centre"
     if kind == "glyph" and c["type"] == "TEXT":
         # Glyph box vs line box: compare the left edge and the vertical centre.
-        d = {"x": round(c["x"] - b["x"], 1), "cy": round((c["y"] + c["h"] / 2) - (b["y"] + b["h"] / 2), 1)}
+        d = {"cx": round((c["x"] + c["w"] / 2) - (b["x"] + b["w"] / 2), 1), "cy": round((c["y"] + c["h"] / 2) - (b["y"] + b["h"] / 2), 1)}
     elif kind == "centre":
         d = {"cx": round((c["x"] + c["w"] / 2) - (b["x"] + b["w"] / 2), 1), "cy": round((c["y"] + c["h"] / 2) - (b["y"] + b["h"] / 2), 1)}
     elif kind == "block" and c["type"] == "TEXT":

@@ -35,7 +35,7 @@ const t0 = Date.now();
 await evaluate(cdp, sessionId, `window.__run = window.extractDocument(${JSON.stringify(html)}, "probe", { viewportWidth: 1440, moduleSources: ${JSON.stringify(sources)} }).then(d => window.__out = d, e => window.__out = { error: String(e && e.stack || e) }); true`, { contextId: ui });
 let out;
 for (let i = 0; i < 1000; i++) {
-  out = await evaluate(cdp, sessionId, `window.__out ? JSON.stringify({ stats: window.__clockStats, error: window.__out.error, dyn: window.__out.dynamicContent, warnings: window.__out.warnings, nodes: (function c(n){ return n ? 1 + (n.children||[]).reduce((a,x)=>a+c(x),0) : 0; })(window.__out.root) }) : ""`, { contextId: ui });
+  out = await evaluate(cdp, sessionId, `window.__out ? JSON.stringify({ missing: window.__out.missingStylesheets, head: (function f(n){ if (n && n.kind === 'TEXT' && n.text.characters.startsWith('Manthan Jha.')) return [n.width, n.height, n.text.singleLine]; for (const c of (n && n.children) || []) { const r = f(c); if (r) return r; } return null; })(window.__out.root), fonts: Array.from(document.fonts).filter(f => /Instrument|Schibsted/.test(f.family)).map(f => f.family + ':' + f.status).slice(0, 6), stats: window.__clockStats, error: window.__out.error, dyn: window.__out.dynamicContent, warnings: window.__out.warnings, nodes: (function c(n){ return n ? 1 + (n.children||[]).reduce((a,x)=>a+c(x),0) : 0; })(window.__out.root) }) : ""`, { contextId: ui });
   if (out) break;
   await sleep(200);
 }

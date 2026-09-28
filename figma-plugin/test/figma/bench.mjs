@@ -145,9 +145,12 @@ async function ask(type, extra = {}) {
 
 await ask("selftest-clear");
 
-// Drop the zip on the real dropzone.
+// Drop the zip on the real dropzone. A freshly launched panel can take a
+// moment to wire its handlers, so the drop is repeated once if Import has not
+// come alive.
+await sleep(1500);
 const b64 = readFileSync(zipPath).toString("base64");
-await run(`(async () => {
+const drop = () => run(`(async () => {
   const bytes = Uint8Array.from(atob(${JSON.stringify(b64)}), (c) => c.charCodeAt(0));
   const file = new File([bytes], ${JSON.stringify(basename(zipPath))}, { type: "application/zip" });
   const dt = new DataTransfer();
@@ -156,9 +159,14 @@ await run(`(async () => {
   zone.dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
   return true;
 })()`);
-
-// Wait until the panel is ready, then pick the mode and import.
-await until(`(() => { const b = document.getElementById("cd2f-import"); return !!b && !b.disabled; })()`, 60000, "the Import button");
+const importReady = `(() => { const b = document.getElementById("cd2f-import"); return !!b && !b.disabled; })()`;
+await drop();
+try {
+  await until(importReady, 15000, "the Import button");
+} catch {
+  await drop();
+  await until(importReady, 60000, "the Import button");
+}
 await run(`(() => {
   const radios = Array.from(document.querySelectorAll("#cd2f-token-mode input[type=radio]"));
   const want = ${JSON.stringify(mode)};

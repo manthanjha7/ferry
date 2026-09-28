@@ -1160,6 +1160,15 @@ async function buildText(node: IRNode, ctx: BuildCtx): Promise<TextNode | null> 
   // the lesser distortion. Genuinely wrapped text keeps its measured width so
   // its line breaks survive.
   text.textAutoResize = spec.singleLine && !spec.fixedWidth ? "WIDTH_AND_HEIGHT" : "HEIGHT";
+  // One line in the source stays one line, even in a kept-width box: Figma's
+  // copy of a face can run a little wider (a 148px Instrument Serif name
+  // wrapped onto a second line). The box is the wider of the two.
+  if (spec.singleLine && spec.fixedWidth && !spec.maxLines) {
+    text.textAutoResize = "WIDTH_AND_HEIGHT";
+    const natural = text.width;
+    text.textAutoResize = "HEIGHT";
+    text.resize(Math.max(node.width, natural, 1), Math.max(node.height, 1));
+  }
 
   // Truncated in the source (ellipsis, line-clamp): the box keeps its width and
   // Figma cuts the text itself, instead of the full string spilling out.

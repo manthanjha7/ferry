@@ -1479,6 +1479,12 @@
     }
     text.resize(Math.max(node.width, 1), Math.max(node.height, 1));
     text.textAutoResize = spec.singleLine && !spec.fixedWidth ? "WIDTH_AND_HEIGHT" : "HEIGHT";
+    if (spec.singleLine && spec.fixedWidth && !spec.maxLines) {
+      text.textAutoResize = "WIDTH_AND_HEIGHT";
+      const natural = text.width;
+      text.textAutoResize = "HEIGHT";
+      text.resize(Math.max(node.width, natural, 1), Math.max(node.height, 1));
+    }
     if (spec.maxLines) {
       try {
         text.textAutoResize = "HEIGHT";
