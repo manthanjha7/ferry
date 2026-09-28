@@ -62,7 +62,7 @@ async function saveDesignSystem(css: string, fileCount: number): Promise<void> {
 
 figma.ui.onmessage = async (message: UIMessage) => {
   if (typeof __SELFTEST__ !== "undefined" && __SELFTEST__ && (message as { type: string }).type.startsWith("selftest-")) {
-    await selftest(message as unknown as { type: string; scale?: number });
+    await selftest(message as unknown as { type: string; scale?: number; components?: boolean });
     return;
   }
   switch (message.type) {
@@ -187,7 +187,7 @@ async function runImport(
  * clears the page, runs an import through the real panel, then asks for what
  * Figma actually rendered, as PNG, and for the layer tree.
  */
-async function selftest(message: { type: string; scale?: number }): Promise<void> {
+async function selftest(message: { type: string; scale?: number; components?: boolean }): Promise<void> {
   const reply = (payload: Record<string, unknown>) => figma.ui.postMessage({ selftest: true, ...payload });
   try {
     if (message.type === "selftest-fonts") {
@@ -219,7 +219,10 @@ async function selftest(message: { type: string; scale?: number }): Promise<void
     }
     if (message.type === "selftest-export") {
       const out = [];
-      for (const frame of frames) {
+      const pick = message.components
+        ? (figma.currentPage.children.filter((n) => n.getPluginData("ferry.role") === "components") as FrameNode[])
+        : frames;
+      for (const frame of pick) {
         const bytes = await frame.exportAsync({ format: "PNG", constraint: { type: "SCALE", value: message.scale ?? 1 } });
         out.push({ name: frame.name, width: frame.width, height: frame.height, png: figma.base64Encode(bytes) });
       }
