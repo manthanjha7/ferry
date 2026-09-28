@@ -1377,6 +1377,40 @@
           const t = (function f(n) { return n.kind === "TEXT" && n.text.characters === "home" ? n : (n.children || []).map(f).find(Boolean) || null; })(lc.root);
           check("an icon whose icon font never loaded stays its name, and the import says so", !!t && lc.warnings.some((w) => /icon "home".*did not load/.test(w)), JSON.stringify({ text: !!t, warn: lc.warnings.filter((w) => /icon/.test(w)) }));
         }
+        {
+          const pixelsOf = async (b64) => {
+            const img = new Image();
+            img.src = "data:image/png;base64," + b64;
+            await img.decode();
+            const c = document.createElement("canvas");
+            c.width = img.width; c.height = img.height;
+            const g = c.getContext("2d");
+            g.drawImage(img, 0, 0);
+            return { w: img.width, h: img.height, at: (x, y) => Array.from(g.getImageData(x, y, 1, 1).data) };
+          };
+          const grid = L("Grid pattern")?.fills?.[0];
+          const gp = grid?.type === "IMAGE" ? await pixelsOf(grid.bytesBase64) : null;
+          check(
+            "a grid of hairline gradients tiles as a pattern: line at the tile edge, clear inside",
+            grid?.scaleMode === "TILE" && grid.scalingFactor === 0.5 && gp?.w === 160 && gp.at(0, 40)[3] > 100 && gp.at(40, 0)[3] > 100 && gp.at(40, 40)[3] === 0,
+            JSON.stringify({ mode: grid?.scaleMode, f: grid?.scalingFactor, size: gp && [gp.w, gp.h], edge: gp?.at(0, 40), inside: gp?.at(40, 40) }),
+          );
+          const faded = L("Faded grid");
+          const mp = faded?.mask ? await pixelsOf(faded.mask) : null;
+          check(
+            "a gradient mask-image is carried as an alpha image: opaque in the middle, clear at the corners",
+            !!mp && mp.at(Math.floor(mp.w / 2), Math.floor(mp.h / 2))[3] > 240 && mp.at(1, 1)[3] < 10,
+            JSON.stringify({ size: mp && [mp.w, mp.h], centre: mp?.at(Math.floor(mp.w / 2), Math.floor(mp.h / 2)), corner: mp?.at(1, 1) }),
+          );
+          const dots = L("Dot pattern")?.fills || [];
+          const dot = dots.find((f) => f.type === "IMAGE");
+          const dp = dot ? await pixelsOf(dot.bytesBase64) : null;
+          check(
+            "a dot grid keeps its background colour under a tiled dot",
+            dots[0]?.type === "SOLID" && !!dp && dp.at(20, 20)[3] > 200 && dp.at(2, 2)[3] === 0,
+            JSON.stringify({ kinds: dots.map((f) => f.type), centre: dp?.at(20, 20), corner: dp?.at(2, 2) }),
+          );
+        }
         const tight = (function f(n) { return n.kind === "TEXT" && n.text.characters.startsWith("Tight leading") ? n : (n.children || []).map(f).find(Boolean) || null; })(lc.root);
         check("a wrapped paragraph whose glyph boxes overlap the next line (tight leading) is still wrapped", tight?.text?.singleLine === false, JSON.stringify(tight && { single: tight.text.singleLine, h: tight.height }));
         check("preconnect links are not reported as missing stylesheets", lc.missingStylesheets.length === 0, JSON.stringify(lc.missingStylesheets));

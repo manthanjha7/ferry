@@ -9,7 +9,7 @@
  * summary table.
  */
 import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, readdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 
 const CASES = {
   stress: { mode: "none", expectOff: ["Marquee", "Spinner"] },
@@ -21,9 +21,13 @@ const CASES = {
   awadh: { mode: "none" },
   control: { mode: "none" },
   icons: { mode: "none" },
+  "anim-mini": { mode: "none", anim: true },
+  "anim-real": { mode: "none", anim: true, local: true },
 };
 const [prefix, ...only] = process.argv.slice(2);
-const names = only.length ? only : Object.keys(CASES);
+// `local` cases are private exports kept out of the repo; run them by name,
+// or all of them when their zip is on this machine.
+const names = only.length ? only : Object.keys(CASES).filter((n) => !CASES[n].local || existsSync(`/tmp/bench/cases/${n}.zip`));
 const sh = (cmd, args) => execFileSync(cmd, args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
 const rows = [];
 for (const name of names) {
@@ -35,6 +39,22 @@ for (const name of names) {
     const bench = JSON.parse(sh("node", ["bench.mjs", prefix, zip, c.mode, dir]).trim().split("\n").pop());
     row.took = bench.took;
     row.frames = bench.frames?.length ?? 0;
+    if (c.anim) {
+      // One frame per scene, each against the engine seeked to its second.
+      const tree = `${dir}/tree.json`;
+      sh("node", ["reference-anim.mjs", zip, tree, dir]);
+      const per = [];
+      for (let i = 1; existsSync(`${dir}/reference-${i}.png`); i++) {
+        mkdirSync(`${dir}/scene-${i}`, { recursive: true });
+        const cmp = JSON.parse(sh("python3", ["compare.py", `${dir}/reference-${i}.png`, `${dir}/frame-${i}.png`, `${dir}/scene-${i}`]));
+        per.push(cmp.mismatch);
+      }
+      row.mismatch = Math.max(...per);
+      row.elements = `${per.length} scenes, mismatch ${per.map((m) => (m * 100).toFixed(1) + "%").join(" / ")}`;
+      rows.push(row);
+      console.log(JSON.stringify(row));
+      continue;
+    }
     const frames = readdirSync(dir).filter((f) => /^frame-\d+\.png$/.test(f)).sort();
     let pick = frames[0];
     if (c.frame) {

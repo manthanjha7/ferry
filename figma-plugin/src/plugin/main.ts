@@ -237,6 +237,8 @@ async function selftest(message: { type: string; scale?: number; components?: bo
           w: Math.round(node.width * 10) / 10, h: Math.round(node.height * 10) / 10,
         };
         if ("rotation" in n && n.rotation) base.rotation = n.rotation;
+        const sceneTime = node.getPluginData("ferry.sceneTime");
+        if (sceneTime) base.sceneTime = Number(sceneTime);
         if ("opacity" in n && n.opacity !== 1) base.opacity = n.opacity;
         if (node.type === "TEXT") {
           base.characters = node.characters;

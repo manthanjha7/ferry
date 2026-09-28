@@ -60,6 +60,8 @@ export type IRImagePaint = {
   /** Base64 payload without the data-URI prefix. */
   bytesBase64: string;
   scaleMode: "FILL" | "FIT" | "TILE" | "CROP";
+  /** TILE only: the image's scale, so a 2x raster tiles at its CSS size. */
+  scalingFactor?: number;
 };
 
 export type IRPaint = IRSolidPaint | IRGradientPaint | IRImagePaint;
@@ -218,6 +220,12 @@ export type IRNode = {
    * that looks different. It becomes the component's Hover variant.
    */
   hover?: IRNode;
+  /**
+   * A CSS `mask-image` gradient, painted as an alpha image the size of the
+   * layer (PNG, base64). Becomes a Figma alpha mask under the layer's paint
+   * and contents.
+   */
+  mask?: string;
 
   fills: IRPaint[];
   border?: IRBorder;
@@ -431,6 +439,8 @@ export type IRDocument = {
    * matrix beside the first.
    */
   props?: Record<string, string | number | boolean>;
+  /** For one scene of an animation: the second it was captured at. */
+  sceneTime?: number;
   designSystem?: IRDesignSystem;
   root: IRNode;
   /** Non-fatal notes surfaced to the user after import. */

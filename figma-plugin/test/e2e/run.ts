@@ -4511,6 +4511,7 @@ async function scenarioZ(ready: boolean): Promise<void> {
     `${p} the design holds an instance of the default variant where the layer was`,
     `${p} the default changes to the hover variant while hovering, with Smart Animate`,
     `${p} the variant set sits in a components frame beside the import`,
+    `${p} (mask) a CSS mask-image becomes an alpha mask under the frame's paint`,
   ];
   if (!ready) {
     for (const n of names) skip(n, "captured/fixture-screen.json not found");
@@ -4537,6 +4538,14 @@ async function scenarioZ(ready: boolean): Promise<void> {
   check(names[1], inst?.type === "INSTANCE" && inst.mainComponentId === set?.children?.[0]?.id && inst.name === "Email", JSON.stringify(inst && [inst.type, inst.mainComponentId, inst.name]));
   const reaction = set?.children?.[0]?.reactions?.[0];
   check(names[2], reaction?.trigger?.type === "ON_HOVER" && reaction.actions?.[0]?.navigation === "CHANGE_TO" && reaction.actions[0].destinationId === set.children[1].id && reaction.actions[0].transition?.type === "SMART_ANIMATE", JSON.stringify(reaction));
+  const mock2 = freshMock();
+  const doc2 = selectFieldDoc();
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+  doc2.root.children = [{ ...plain, kind: "FRAME", name: "Hero grid", x: 0, y: 0, width: 300, height: 200, fills: [{ type: "SOLID", color: { r: 0.8, g: 0.9, b: 0.85, a: 1 } }], mask: png, children: [] } as IRNode];
+  const built2 = await buildDocument(doc2, { kind: "none" }, () => {});
+  const hero = mock2.serializeTree(built2.root).children[0];
+  check(names[4], hero?.children?.[0]?.name === "Mask" && hero.children[1]?.name === "Fill" && (hero.fills ?? []).length === 0 && hero.children[1].fills?.[0]?.type === "SOLID",
+    JSON.stringify(hero && { kids: hero.children.map((c: any) => c.name), fills: hero.fills }));
   check(names[3], !!area && result.componentsArea!.parent?.type === "PAGE" && result.componentsArea!.x >= result.root.x + result.root.width, JSON.stringify(area && [area.name, result.componentsArea!.x, result.root.x + result.root.width]));
 }
 

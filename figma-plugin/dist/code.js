@@ -982,6 +982,7 @@
       root.name = doc.name;
       unmakeLoneComponents(ctx);
       if (doc.props) root.setPluginData("ferry.props", JSON.stringify(doc.props));
+      if (doc.sceneTime !== void 0) root.setPluginData("ferry.sceneTime", String(doc.sceneTime));
       figma.currentPage.appendChild(root);
       if (options.place !== false) placeBesideExistingContent(root);
       if (ctx.componentsArea) {
@@ -1426,7 +1427,40 @@
     for (let i = 0; i < built.length; i++) {
       if (builtIr[i].rotation) rotateInPlace(built[i], builtIr[i], !node.layout || !!builtIr[i].absolute);
     }
+    if (node.mask) applyMask(frame, node, ctx);
     return frame;
+  }
+  function applyMask(frame, node, ctx) {
+    try {
+      const mask = figma.createRectangle();
+      mask.name = "Mask";
+      mask.resize(Math.max(frame.width, 0.01), Math.max(frame.height, 0.01));
+      mask.fills = [{ type: "IMAGE", imageHash: figma.createImage(figma.base64Decode(node.mask)).hash, scaleMode: "FILL" }];
+      const paints = frame.fills;
+      const layers = [mask];
+      if (Array.isArray(paints) && paints.length > 0) {
+        const fill = figma.createRectangle();
+        fill.name = "Fill";
+        fill.resize(Math.max(frame.width, 0.01), Math.max(frame.height, 0.01));
+        fill.fills = paints;
+        fill.cornerRadius = frame.cornerRadius === figma.mixed ? 0 : frame.cornerRadius;
+        frame.fills = [];
+        layers.push(fill);
+      }
+      layers.forEach((layer, i) => {
+        frame.insertChild(i, layer);
+        if (frame.layoutMode !== "NONE") layer.layoutPositioning = "ABSOLUTE";
+        layer.x = 0;
+        layer.y = 0;
+      });
+      mask.isMask = true;
+      try {
+        mask.maskType = "ALPHA";
+      } catch (e) {
+      }
+    } catch (error) {
+      ctx.warnings.push(`The fade on "${node.name}" was not carried: ${error.message}`);
+    }
   }
   function asComponent(built, ir, ctx) {
     var _a;
@@ -1838,7 +1872,7 @@
     if (paint.type === "IMAGE") {
       try {
         const image = figma.createImage(figma.base64Decode(paint.bytesBase64));
-        return { type: "IMAGE", imageHash: image.hash, scaleMode: paint.scaleMode };
+        return paint.scaleMode === "TILE" && paint.scalingFactor ? { type: "IMAGE", imageHash: image.hash, scaleMode: "TILE", scalingFactor: paint.scalingFactor } : { type: "IMAGE", imageHash: image.hash, scaleMode: paint.scaleMode };
       } catch (e) {
         return null;
       }

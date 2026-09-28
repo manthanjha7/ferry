@@ -148,6 +148,7 @@ export async function buildDocument(
     // to work out afterwards which of fourteen frames was `state=warning`.
     // Cheap on the first build, impossible to backfill on any later one.
     if (doc.props) root.setPluginData("ferry.props", JSON.stringify(doc.props));
+    if (doc.sceneTime !== undefined) root.setPluginData("ferry.sceneTime", String(doc.sceneTime));
 
     // Appending is unconditional: a frame that never reaches the page is not
     // an import, and `BuildResult.root` is read by callers that expect it to
@@ -1062,7 +1063,47 @@ async function buildFrame(node: IRNode, ctx: BuildCtx): Promise<FrameNode> {
     if (builtIr[i].rotation) rotateInPlace(built[i], builtIr[i], !node.layout || !!builtIr[i].absolute);
   }
 
+  if (node.mask) applyMask(frame, node, ctx);
   return frame;
+}
+
+/**
+ * CSS `mask-image` as a Figma alpha mask: a layer at the bottom of the frame
+ * filled with the mask's alpha, and the frame's own paint moved onto a layer
+ * above it, so the mask covers the paint and every child, as CSS does.
+ */
+function applyMask(frame: FrameNode, node: IRNode, ctx: BuildCtx): void {
+  try {
+    const mask = figma.createRectangle();
+    mask.name = "Mask";
+    mask.resize(Math.max(frame.width, 0.01), Math.max(frame.height, 0.01));
+    mask.fills = [{ type: "IMAGE", imageHash: figma.createImage(figma.base64Decode(node.mask!)).hash, scaleMode: "FILL" }];
+    const paints = frame.fills;
+    const layers: SceneNode[] = [mask];
+    if (Array.isArray(paints) && paints.length > 0) {
+      const fill = figma.createRectangle();
+      fill.name = "Fill";
+      fill.resize(Math.max(frame.width, 0.01), Math.max(frame.height, 0.01));
+      fill.fills = paints;
+      fill.cornerRadius = frame.cornerRadius === figma.mixed ? 0 : frame.cornerRadius;
+      frame.fills = [];
+      layers.push(fill);
+    }
+    layers.forEach((layer, i) => {
+      frame.insertChild(i, layer);
+      if (frame.layoutMode !== "NONE") (layer as RectangleNode).layoutPositioning = "ABSOLUTE";
+      layer.x = 0;
+      layer.y = 0;
+    });
+    mask.isMask = true;
+    try {
+      (mask as RectangleNode & { maskType: string }).maskType = "ALPHA";
+    } catch {
+      // Alpha is the default where the property does not exist.
+    }
+  } catch (error) {
+    ctx.warnings.push(`The fade on "${node.name}" was not carried: ${(error as Error).message}`);
+  }
 }
 
 /**
@@ -1639,7 +1680,9 @@ function toFigmaPaint(paint: IRPaint, ctx: BuildCtx): Paint | null {
   if (paint.type === "IMAGE") {
     try {
       const image = figma.createImage(figma.base64Decode(paint.bytesBase64));
-      return { type: "IMAGE", imageHash: image.hash, scaleMode: paint.scaleMode };
+      return paint.scaleMode === "TILE" && paint.scalingFactor
+        ? { type: "IMAGE", imageHash: image.hash, scaleMode: "TILE", scalingFactor: paint.scalingFactor }
+        : { type: "IMAGE", imageHash: image.hash, scaleMode: paint.scaleMode };
     } catch {
       return null;
     }

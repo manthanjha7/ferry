@@ -1567,8 +1567,11 @@ export async function extractAnimationScenes(
     for (let i = 0; i < live.scenes.length; i++) {
       const scene = live.scenes[i];
       onScene?.(i, live.scenes.length, scene.name);
-      live.seek(settledMoment(live, scene));
-      docs.push(await measureMounted(handle, html, `${name} · ${i + 1} ${scene.name}`, opts));
+      const at = settledMoment(live, scene);
+      live.seek(at);
+      const doc = await measureMounted(handle, html, `${name} · ${i + 1} ${scene.name}`, opts);
+      doc.sceneTime = Math.round(at * 1000) / 1000;
+      docs.push(doc);
     }
     return { docs, scenes: live.scenes.map((s) => ({ name: s.name, dur: s.dur })), loop: live.loop };
   } finally {
@@ -2571,6 +2574,7 @@ async function walkMeasured(
     name: frameName(el, layout, style, base),
     ...base,
     layout,
+    mask: maskImage(style, base.width, base.height),
     fills: backgroundPaints(el, style, ctx),
     border,
     cornerRadius: radii,
@@ -3935,6 +3939,14 @@ function backgroundPaints(
 
   const image = style.backgroundImage;
   if (image && image !== "none") {
+    // A gradient tiled at a fixed size is a pattern (a grid of hairlines, a
+    // dot grid), not one gradient across the box: the first layer stretched
+    // over the whole frame was a near-invisible wash, and the grid was gone.
+    const tile = patternTile(el, style);
+    if (tile) {
+      paints.push({ type: "IMAGE", bytesBase64: toBase64(tile.bytes), scaleMode: "TILE", scalingFactor: 1 / tile.scale });
+      return paints;
+    }
     const gradient = parseLinearGradient(image);
     const coverage = gradient ? backgroundCoverage(el, style) : "full";
     if (gradient && coverage === "full") {
@@ -3969,6 +3981,169 @@ function backgroundPaints(
   }
 
   return paints;
+}
+
+/**
+ * One tile of a repeating gradient background, painted the way CSS paints it,
+ * at 2x. Only for backgrounds made entirely of linear and radial gradients,
+ * repeating, at one fixed size smaller than the box: the grid and dot-grid
+ * idioms. Anything else is left to the single-gradient path.
+ */
+function patternTile(el: HTMLElement, style: CSSStyleDeclaration): { bytes: Uint8Array; scale: number } | null {
+  const layers = splitTopLevel(style.backgroundImage);
+  if (!layers.length || !layers.every((l) => /^(repeating-)?(linear|radial)-gradient\(/.test(l.trim()))) return null;
+  if (layers.some((l) => l.trim().startsWith("repeating-"))) return null;
+  const sizes = splitTopLevel(style.backgroundSize || "auto").map((s) => s.trim());
+  const repeats = splitTopLevel(style.backgroundRepeat || "repeat").map((s) => s.trim());
+  const size = sizes[0];
+  if (!size || sizes.some((s) => s !== size)) return null;
+  if (repeats.some((r) => !/^(repeat|repeat repeat)$/.test(r))) return null;
+  const m = /^(\d+(?:\.\d+)?)px(?:\s+(\d+(?:\.\d+)?)px)?$/.exec(size);
+  if (!m) return null;
+  const w = parseFloat(m[1]);
+  const h = m[2] ? parseFloat(m[2]) : w;
+  const box = el.getBoundingClientRect();
+  if (w < 2 || h < 2 || (w >= box.width - 0.5 && h >= box.height - 0.5)) return null;
+
+  const scale = 2;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(w * scale);
+  canvas.height = Math.round(h * scale);
+  const paint = canvas.getContext("2d");
+  if (!paint) return null;
+  paint.scale(scale, scale);
+  // The first layer is on top: paint from the last.
+  for (const layer of [...layers].reverse()) {
+    if (!paintGradientLayer(paint, layer.trim(), w, h)) return null;
+  }
+  const bytes = dataUrlBytes(canvas.toDataURL("image/png"));
+  return bytes ? { bytes, scale } : null;
+}
+
+/**
+ * A `mask-image` made of gradients, as an alpha PNG the size of the box: the
+ * fade on a hero's grid pattern. At most 400px wide; a gradient mask is
+ * smooth, and Figma stretches it. A mask from an image URL is not carried.
+ */
+function maskImage(style: CSSStyleDeclaration, width: number, height: number): string | undefined {
+  const value = (style as unknown as Record<string, string>).maskImage || (style as unknown as Record<string, string>).webkitMaskImage || "";
+  if (!value || value === "none") return undefined;
+  const layers = splitTopLevel(value);
+  if (!layers.every((l) => /^(linear|radial)-gradient\(/.test(l.trim()))) return undefined;
+  if (width < 1 || height < 1) return undefined;
+  const scale = Math.min(1, 400 / width);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(width * scale));
+  canvas.height = Math.max(1, Math.round(height * scale));
+  const paint = canvas.getContext("2d");
+  if (!paint) return undefined;
+  paint.scale(scale, scale);
+  for (const layer of [...layers].reverse()) {
+    if (!paintGradientLayer(paint, layer.trim(), width, height)) return undefined;
+  }
+  const bytes = dataUrlBytes(canvas.toDataURL("image/png"));
+  return bytes ? toBase64(bytes) : undefined;
+}
+
+/** Stops from `color [pos [pos]]` parts, positions as fractions of `length`. */
+function gradientStops(parts: string[], length: number): Array<{ color: string; at: number }> | null {
+  const raw: Array<{ color: string; at: number | null }> = [];
+  for (const part of parts) {
+    const tokens = /^(.*?)((?:\s+-?\d*\.?\d+(?:px|%))*)$/.exec(part.trim());
+    if (!tokens) return null;
+    const color = tokens[1].trim();
+    const positions = tokens[2].trim() ? tokens[2].trim().split(/\s+/) : [];
+    const at = (p: string) => (p.endsWith("%") ? parseFloat(p) / 100 : parseFloat(p) / length);
+    if (positions.length === 0) raw.push({ color, at: null });
+    for (const p of positions) raw.push({ color, at: at(p) });
+  }
+  if (raw.length < 2) return null;
+  if (raw[0].at === null) raw[0].at = 0;
+  if (raw[raw.length - 1].at === null) raw[raw.length - 1].at = 1;
+  // Unpositioned stops are spread evenly between their neighbours.
+  for (let i = 1; i < raw.length - 1; i++) {
+    if (raw[i].at !== null) continue;
+    let j = i;
+    while (raw[j].at === null) j++;
+    const from = raw[i - 1].at!;
+    const to = raw[j].at!;
+    for (let k = i; k < j; k++) raw[k].at = from + ((to - from) * (k - i + 1)) / (j - i + 1);
+  }
+  let last = 0;
+  return raw.map((s) => {
+    last = Math.max(last, s.at!);
+    return { color: s.color, at: Math.min(1, Math.max(0, last)) };
+  });
+}
+
+function paintGradientLayer(paint: CanvasRenderingContext2D, layer: string, w: number, h: number): boolean {
+  const radial = layer.startsWith("radial-gradient(");
+  const inner = layer.slice(layer.indexOf("(") + 1, layer.lastIndexOf(")"));
+  const args = splitTopLevel(inner).map((a) => a.trim());
+  const isColorStart = (a: string) => /^(#|rgb|hsl|transparent|currentcolor|[a-z]+(\s|$))/i.test(a) && !/^(to |circle|ellipse|at |closest|farthest)/i.test(a) && !/deg|turn|rad$/.test(a.split(/\s+/)[0]);
+  const head = args.length && !isColorStart(args[0]) ? args.shift()! : "";
+  paint.save();
+  try {
+    if (!radial) {
+      let angle = 180;
+      const d = head.toLowerCase();
+      if (/deg$/.test(d)) angle = parseFloat(d);
+      else if (/turn$/.test(d)) angle = parseFloat(d) * 360;
+      else if (/rad$/.test(d)) angle = (parseFloat(d) * 180) / Math.PI;
+      else if (d.startsWith("to ")) {
+        const x = d.includes("right") ? 1 : d.includes("left") ? -1 : 0;
+        const y = d.includes("bottom") ? 1 : d.includes("top") ? -1 : 0;
+        angle = x === 0 ? (y < 0 ? 0 : 180) : y === 0 ? (x > 0 ? 90 : 270) : (Math.atan2(x * h, -y * w) * 180) / Math.PI;
+      }
+      const a = (angle * Math.PI) / 180;
+      const dx = Math.sin(a);
+      const dy = -Math.cos(a);
+      const length = Math.abs(w * dx) + Math.abs(h * dy);
+      const stops = gradientStops(args, length);
+      if (!stops) return false;
+      const g = paint.createLinearGradient(w / 2 - (dx * length) / 2, h / 2 - (dy * length) / 2, w / 2 + (dx * length) / 2, h / 2 + (dy * length) / 2);
+      for (const s of stops) g.addColorStop(s.at, s.color);
+      paint.fillStyle = g;
+      paint.fillRect(0, 0, w, h);
+      return true;
+    }
+    // Radial: shape, size and centre from the head, the defaults otherwise.
+    const at = /\bat\s+(.+)$/.exec(head)?.[1]?.trim() ?? "50% 50%";
+    const [px0, py0 = "50%"] = at.replace(/\bcenter\b/g, "50%").replace(/\bleft\b/, "0%").replace(/\bright\b/, "100%").replace(/\btop\b/, "0%").replace(/\bbottom\b/, "100%").split(/\s+/);
+    const pos = (p: string, span: number) => (p.endsWith("%") ? (parseFloat(p) / 100) * span : parseFloat(p));
+    const cx = pos(px0, w);
+    const cy = pos(py0, h);
+    const shapeText = head.replace(/\bat\s+.+$/, "").trim();
+    const circle = /circle/.test(shapeText) || (!/ellipse/.test(shapeText) && /^\d/.test(shapeText) && !/\s/.test(shapeText));
+    const explicit = /(-?\d*\.?\d+)px/.exec(shapeText);
+    const sideX = /closest-side/.test(shapeText) ? Math.min(cx, w - cx) : Math.max(cx, w - cx);
+    const sideY = /closest-side/.test(shapeText) ? Math.min(cy, h - cy) : Math.max(cy, h - cy);
+    const corner = /side/.test(shapeText) ? 1 : Math.SQRT2;
+    let rx: number;
+    let ry: number;
+    if (explicit) {
+      rx = ry = parseFloat(explicit[1]);
+    } else if (circle) {
+      rx = ry = /side/.test(shapeText) ? (/closest/.test(shapeText) ? Math.min(sideX, sideY) : Math.max(sideX, sideY)) : Math.hypot(sideX, sideY);
+    } else {
+      rx = sideX * corner;
+      ry = sideY * corner;
+    }
+    if (!(rx > 0) || !(ry > 0)) return false;
+    const stops = gradientStops(args, rx);
+    if (!stops) return false;
+    paint.translate(cx, cy);
+    paint.scale(1, ry / rx);
+    const g = paint.createRadialGradient(0, 0, 0, 0, 0, rx);
+    for (const s of stops) g.addColorStop(s.at, s.color);
+    paint.fillStyle = g;
+    paint.fillRect(-cx, (-cy * rx) / ry, w, (h * rx) / ry);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    paint.restore();
+  }
 }
 
 /** The first `url(...)` in a background-image value. */
