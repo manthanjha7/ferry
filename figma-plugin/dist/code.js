@@ -1781,6 +1781,13 @@
     applyBlend(text, node);
     return text;
   }
+  function linkTarget(href) {
+    if (!href) return null;
+    const value = href.trim();
+    if (/^mailto:[^\s@]+@[^\s@]+$/i.test(value)) return value;
+    if (!/^https?:\/\/[^\s/?#]+\.[^\s/?#]+/i.test(value)) return null;
+    return value;
+  }
   function applyRun(text, start, end, run, ctx) {
     var _a;
     const font = ctx.fonts.resolve(((_a = run.fontStack) == null ? void 0 : _a.length) ? run.fontStack.join(",") : run.fontFamily, run.fontWeight, run.italic);
@@ -1817,8 +1824,12 @@
         }
       }
       text.setRangeTextCase(start, end, run.textCase);
-      if (run.href) {
-        text.setRangeHyperlink(start, end, { type: "URL", value: run.href });
+      const href = linkTarget(run.href);
+      if (href) {
+        try {
+          text.setRangeHyperlink(start, end, { type: "URL", value: href });
+        } catch (e) {
+        }
       }
     } catch (error) {
       ctx.warnings.push(
@@ -2064,7 +2075,7 @@
     }
   }
   figma.ui.onmessage = async (message) => {
-    if (message.type.startsWith("selftest-")) {
+    if (false) {
       await selftest(message);
       return;
     }
@@ -2157,106 +2168,6 @@
       console.error("[ferry] import failed", error instanceof Error ? error.stack || error.message : error);
       post({ type: "import-failed", message: describeError(error) });
       figma.notify("Import failed. See the panel for details.", { error: true });
-    }
-  }
-  async function selftest(message) {
-    var _a, _b;
-    const reply = (payload) => figma.ui.postMessage(__spreadValues({ selftest: true }, payload));
-    try {
-      if (message.type === "selftest-fonts") {
-        const t0 = Date.now();
-        const list = await figma.listAvailableFontsAsync();
-        const t1 = Date.now();
-        const loads = {};
-        for (const fam of ["Inter", "Roboto", "Geist", "Newsreader", "Hind"]) {
-          const s0 = Date.now();
-          try {
-            await figma.loadFontAsync({ family: fam, style: "Regular" });
-            loads[fam] = `${Date.now() - s0}ms`;
-          } catch (e) {
-            loads[fam] = `${Date.now() - s0}ms ${String(e.message).slice(0, 80)}`;
-          }
-        }
-        reply({ type: "selftest-fonts", list: list.length, listMs: t1 - t0, loads });
-        return;
-      }
-      if (message.type === "selftest-eval") {
-        const fn = new Function("figma", `return (async () => { ${message.code} })()`);
-        reply({ type: "selftest-eval", value: JSON.stringify(await fn(figma)) });
-        return;
-      }
-      if (message.type === "selftest-clear") {
-        for (const node of [...figma.currentPage.children]) node.remove();
-        reply({ type: "selftest-cleared" });
-        return;
-      }
-      const tops = figma.currentPage.children.filter(
-        (n) => (n.type === "FRAME" || n.type === "SECTION") && n.getPluginData("ferry.role") !== "components"
-      );
-      const frames = [];
-      for (const top of tops) {
-        if (top.type === "SECTION") frames.push(...top.children.filter((c) => c.type === "FRAME"));
-        else frames.push(top);
-      }
-      if (message.type === "selftest-export") {
-        const out = [];
-        const pick = message.components ? figma.currentPage.children.filter((n) => n.getPluginData("ferry.role") === "components") : frames;
-        for (const frame of pick) {
-          const bytes = await frame.exportAsync({ format: "PNG", constraint: { type: "SCALE", value: (_a = message.scale) != null ? _a : 1 } });
-          out.push({ name: frame.name, width: frame.width, height: frame.height, png: figma.base64Encode(bytes) });
-        }
-        reply({ type: "selftest-png", frames: out });
-        return;
-      }
-      if (message.type === "selftest-tree") {
-        const dump = (node) => {
-          const n = node;
-          const base = {
-            type: node.type,
-            name: node.name,
-            x: Math.round(node.x * 10) / 10,
-            y: Math.round(node.y * 10) / 10,
-            w: Math.round(node.width * 10) / 10,
-            h: Math.round(node.height * 10) / 10
-          };
-          if ("rotation" in n && n.rotation) base.rotation = n.rotation;
-          const sceneTime = node.getPluginData("ferry.sceneTime");
-          if (sceneTime) base.sceneTime = Number(sceneTime);
-          if ("opacity" in n && n.opacity !== 1) base.opacity = n.opacity;
-          if (node.type === "TEXT") {
-            base.characters = node.characters;
-            base.font = node.fontName === figma.mixed ? "mixed" : `${node.fontName.family} ${node.fontName.style}`;
-            base.size = node.fontSize === figma.mixed ? "mixed" : node.fontSize;
-            base.align = node.textAlignHorizontal;
-            base.resize = node.textAutoResize;
-            if (node.textTruncation !== "DISABLED") base.truncation = `${node.textTruncation}/${node.maxLines}`;
-          }
-          if ("fills" in n && Array.isArray(n.fills) && n.fills.length) {
-            base.fills = n.fills.map((p) => {
-              var _a2;
-              return p.type + (((_a2 = p.boundVariables) == null ? void 0 : _a2.color) ? "*" : "");
-            });
-          }
-          if ("layoutMode" in n && n.layoutMode !== "NONE") base.layout = n.layoutMode;
-          if ("children" in node) base.children = node.children.map(dump);
-          return base;
-        };
-        const collections = await figma.variables.getLocalVariableCollectionsAsync();
-        const areas = figma.currentPage.children.filter((n) => n.getPluginData("ferry.role") === "components");
-        reply({
-          type: "selftest-tree",
-          frames: frames.map(dump),
-          components: areas.map(dump),
-          collections: collections.map((c) => ({ name: c.name, modes: c.modes.map((m) => m.name), count: c.variableIds.length })),
-          reactions: frames.map((f) => ({ name: f.name, reactions: f.reactions.map((r) => {
-            var _a2, _b2, _c, _d;
-            return { trigger: (_a2 = r.trigger) == null ? void 0 : _a2.type, timeout: (_b2 = r.trigger) == null ? void 0 : _b2.timeout, transition: ((_c = r.actions) == null ? void 0 : _c[0]) && ((_d = r.actions[0].transition) == null ? void 0 : _d.type) };
-          }) }))
-        });
-        return;
-      }
-    } catch (error) {
-      reply({ type: "selftest-error", message: String((_b = error == null ? void 0 : error.message) != null ? _b : error) });
     }
   }
   function post(message) {

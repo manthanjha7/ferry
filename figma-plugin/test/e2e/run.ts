@@ -4409,6 +4409,7 @@ async function scenarioX(ready: boolean): Promise<void> {
     `${p} a spacer child fills the row`,
     `${p} one line ending in a space keeps its measured width (Figma's auto width drops the space)`,
     `${p} a bordered auto-layout frame includes its strokes in layout, as CSS border-box does`,
+    `${p} a placeholder or page-anchor link is left unlinked, silently; a real address is linked`,
   ];
   if (!ready) {
     for (const n of names) skip(n, "captured/fixture-screen.json not found");
@@ -4445,6 +4446,18 @@ async function scenarioX(ready: boolean): Promise<void> {
   const builtLead = find(raw, "More about me");
   check(names[3], builtLead?.textAutoResize === "HEIGHT" && builtLead?.width >= 100, `${builtLead?.textAutoResize} w=${builtLead?.width}`);
   check(names[4], builtRow?.strokesIncludedInLayout === true, String(builtRow?.strokesIncludedInLayout));
+  {
+    const mockL = freshMock();
+    const docL = selectFieldDoc();
+    const linkText = (label: string, href: string, y: number): IRNode => ({ ...plain, kind: "TEXT", name: label, x: 0, y, width: 100, height: 20,
+      text: { characters: label, runs: [{ ...run, end: label.length, href }], align: "LEFT", verticalAlign: "TOP", singleLine: true }, children: [] } as IRNode);
+    docL.root.children = [linkText("LinkedIn", "#", 0), linkText("Top", "#hero", 30), linkText("GitHub", "https://github.com/x", 60), linkText("Mail", "mailto:a@b.co", 90)];
+    const res = await buildDocument(docL, { kind: "none" }, () => {});
+    const byName = (n: string) => (mockL.getRootNodes()[0].children as any[]).find((c: any) => c.name === n);
+    const linked = (n: string) => (byName(n)?._charHyperlinks ?? []).some(Boolean);
+    check(names[5], !res.warnings.some((w) => /hyperlink|styling failed/i.test(w)) && !linked("LinkedIn") && !linked("Top") && linked("GitHub") && linked("Mail"),
+      JSON.stringify({ warnings: res.warnings.filter((w) => /hyperlink|styling/i.test(w)), linkedIn: linked("LinkedIn"), github: linked("GitHub"), mail: linked("Mail") }));
+  }
   void result;
 }
 

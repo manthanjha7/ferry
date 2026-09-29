@@ -1021,6 +1021,10 @@ export function createFigmaMock(options: MockOptions = {}): FigmaMock {
 
     setRangeHyperlink(start: number, end: number, value: HyperlinkTarget | null): void {
       assertAlive(this);
+      // Figma refuses what is not an absolute address.
+      if (value && value.type === "URL" && !/^(https?:\/\/\S+|mailto:\S+)$/i.test(value.value)) {
+        throw new Error("in setRangeHyperlink: Unsupported or invalid hyperlink url");
+      }
       validateRange(this, start, end);
       assertRangeFontsLoaded(this, start, end);
       for (let i = start; i < end; i++) this._charHyperlinks[i] = value;

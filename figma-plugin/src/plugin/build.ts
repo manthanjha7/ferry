@@ -1562,6 +1562,15 @@ async function buildText(node: IRNode, ctx: BuildCtx): Promise<TextNode | null> 
   return text;
 }
 
+/** An absolute web or email address, or null. */
+function linkTarget(href: string | undefined): string | null {
+  if (!href) return null;
+  const value = href.trim();
+  if (/^mailto:[^\s@]+@[^\s@]+$/i.test(value)) return value;
+  if (!/^https?:\/\/[^\s/?#]+\.[^\s/?#]+/i.test(value)) return null;
+  return value;
+}
+
 function applyRun(
   text: TextNode,
   start: number,
@@ -1608,8 +1617,16 @@ function applyRun(
     }
     text.setRangeTextCase(start, end, run.textCase);
 
-    if (run.href) {
-      text.setRangeHyperlink(start, end, { type: "URL", value: run.href });
+    // Only a real address is a Figma hyperlink. A design's placeholder
+    // ("#"), a page anchor ("#hero") or a relative path is refused as
+    // "invalid hyperlink url", and the whole run's styling was reported failed.
+    const href = linkTarget(run.href);
+    if (href) {
+      try {
+        text.setRangeHyperlink(start, end, { type: "URL", value: href });
+      } catch {
+        // Figma would not take this address; the words stay, unlinked.
+      }
     }
   } catch (error) {
     ctx.warnings.push(
