@@ -1,0 +1,130 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  :root {
+    --blue: #0d99ff;
+    --blue-ink: #0a84dd;
+    --ink: #1e1e1e;
+    --muted: #767676;
+    --line: #e6e6e6;
+    --bg: #ffffff;
+    --panel: #f7f8fa;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; width: 1920px; height: 1080px; overflow: hidden;
+    background: var(--bg);
+    font-family: -apple-system, "Inter", "Segoe UI", Roboto, sans-serif;
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { display: flex; height: 100%; align-items: center; gap: 90px; padding: 0 130px; }
+  .left { width: 720px; flex: none; }
+  .right { flex: 1; display: flex; align-items: center; justify-content: center; gap: 40px; }
+
+  .brandrow { display: flex; align-items: center; gap: 26px; margin-bottom: 40px; }
+  .mark { width: 88px; height: 88px; border-radius: 22px;
+          background: linear-gradient(180deg, #1a9dff, #0a84dd);
+          display: flex; align-items: center; justify-content: center; }
+  .wordmark { font-size: 92px; font-weight: 700; letter-spacing: -2px; }
+
+  .kicker { display: inline-block; font-size: 26px; font-weight: 600; color: var(--blue);
+            background: #e5f4ff; padding: 8px 18px; border-radius: 999px; margin-bottom: 26px; }
+  h1 { font-size: 52px; line-height: 1.12; font-weight: 700; margin: 0 0 24px; letter-spacing: -1px; }
+  p.sub { font-size: 27px; line-height: 1.5; color: var(--muted); margin: 0 0 38px; max-width: 660px; }
+
+  .pills { display: flex; gap: 14px; flex-wrap: wrap; }
+  .pill { font-size: 22px; font-weight: 500; color: var(--ink);
+          border: 1.5px solid var(--line); border-radius: 999px; padding: 10px 22px; }
+  .pill b { color: var(--blue); font-weight: 700; }
+
+  /* ---- transform visual ---- */
+  .card { border-radius: 22px; box-shadow: 0 24px 60px rgba(20,30,50,.12); }
+  .code { width: 360px; height: 430px; background: #1e1e1e; padding: 26px 28px; }
+  .dots { display: flex; gap: 9px; margin-bottom: 26px; }
+  .dots i { width: 13px; height: 13px; border-radius: 50%; background: #3a3a3a; }
+  .code pre { margin: 0; font-family: ui-monospace, "SF Mono", Menlo, monospace;
+              font-size: 21px; line-height: 2.05; color: #c9c9c9; }
+  .tag { color: #6fb7ff; } .attr { color: #d4a5ff; } .val { color: #7ee0b0; } .cmt { color: #6b6b6b; }
+
+  .arrow { font-size: 64px; color: var(--blue); font-weight: 700; }
+
+  .figma { width: 420px; height: 470px; background: #fff; border: 1.5px solid var(--line);
+           padding: 22px; display: flex; flex-direction: column; gap: 16px; }
+  .figbar { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 18px; font-weight: 600; }
+  .figbar .sq { width: 16px; height: 16px; border-radius: 4px; border: 2px solid var(--blue); }
+  .layers { display: flex; flex-direction: column; gap: 10px; }
+  .layer { height: 40px; border-radius: 8px; background: var(--panel); display: flex; align-items: center; padding: 0 14px; gap: 10px; color: var(--muted); font-size: 18px; }
+  .layer .ic { width: 14px; height: 14px; border-radius: 3px; background: #cfd6df; }
+  .layer.head { background: #e5f4ff; color: var(--blue); font-weight: 600; }
+  .varpanel { margin-top: auto; border-top: 1.5px solid var(--line); padding-top: 16px; }
+  .varhead { font-size: 17px; font-weight: 700; color: var(--ink); margin-bottom: 12px; letter-spacing: .3px; }
+  .varrow { display: flex; align-items: center; justify-content: space-between; font-size: 19px; margin-bottom: 11px;
+            font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .varrow .name { color: var(--ink); display: flex; align-items: center; gap: 10px; }
+  .varrow .name .sw { width: 18px; height: 18px; border-radius: 5px; }
+  .varrow .v { color: var(--muted); }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="left">
+      <div class="brandrow">
+        <div class="mark">
+          <svg width="52" height="52" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+            <rect x="58" y="38" width="46" height="52" rx="10" fill="none" stroke="#fff" stroke-width="7"/>
+            <circle cx="74" cy="64" r="4.5" fill="#fff"/>
+            <circle cx="90" cy="64" r="4.5" fill="#fff" opacity="0.55"/>
+            <path d="M24 46 L42 64 L24 82" fill="none" stroke="#fff" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div class="wordmark">Ferry</div>
+      </div>
+
+      <div class="kicker">Claude Design &nbsp;&rarr;&nbsp; Figma</div>
+      <h1>Import Claude Design<br/>as editable Figma layers.</h1>
+      <p class="sub">Auto-layout inferred, text stays text, and your tokens bind to real
+        Figma <b style="color:var(--ink)">variables</b>, not flat styles. Themed screens
+        come across as modes.</p>
+
+      <div class="pills">
+        <div class="pill"><b>Variables</b>, not styles</div>
+        <div class="pill">Themes &rarr; <b>modes</b></div>
+        <div class="pill">Whole projects</div>
+      </div>
+    </div>
+
+    <div class="right">
+      <div class="card code">
+        <div class="dots"><i></i><i></i><i></i></div>
+        <pre><span class="cmt">&lt;!-- Claude Design --&gt;</span>
+<span class="tag">&lt;div</span> <span class="attr">class</span>=<span class="val">"card"</span><span class="tag">&gt;</span>
+  <span class="tag">&lt;h2&gt;</span>Revenue<span class="tag">&lt;/h2&gt;</span>
+  <span class="tag">&lt;span</span> <span class="attr">style</span>=<span class="val">"..."</span><span class="tag">&gt;</span>
+    +18.4%
+  <span class="tag">&lt;/span&gt;</span>
+<span class="tag">&lt;/div&gt;</span></pre>
+      </div>
+
+      <div class="arrow">&rarr;</div>
+
+      <div class="card figma">
+        <div class="figbar"><span class="sq"></span> Frame · Revenue card</div>
+        <div class="layers">
+          <div class="layer head"><span class="ic" style="background:#0d99ff"></span> Auto layout</div>
+          <div class="layer"><span class="ic"></span> Revenue</div>
+          <div class="layer"><span class="ic"></span> +18.4%</div>
+        </div>
+        <div class="varpanel">
+          <div class="varhead">BOUND VARIABLES</div>
+          <div class="varrow"><span class="name"><span class="sw" style="background:#0d99ff"></span>color/brand</span><span class="v">#0D99FF</span></div>
+          <div class="varrow"><span class="name"><span class="sw" style="background:#f0f0f0;border:1.5px solid #e6e6e6"></span>space/4</span><span class="v">8</span></div>
+          <div class="varrow"><span class="name"><span class="sw" style="background:#f0f0f0;border:1.5px solid #e6e6e6"></span>radius/md</span><span class="v">6</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

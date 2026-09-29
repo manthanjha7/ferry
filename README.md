@@ -175,7 +175,7 @@ Figma: **Plugins → Development → Import plugin from manifest…** and pick
 ## Publishing checklist
 
 - [x] `manifest.json` carries the `id` Figma assigned on publish
-      (`1666447283490267206`), so plugin updates map to the same listing.
+      (`1686906820698118797`), so plugin updates map to the same listing.
 - [x] Community listing assets: 128x128 icon and 1920x960 cover in `branding/`
       (`icon.png`, `cover.png`, rebuildable from `icon.html` / `cover.html`),
       tagline and description in `branding/LISTING.md`.
