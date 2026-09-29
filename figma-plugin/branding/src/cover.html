@@ -1,0 +1,46 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="brand.css">
+<style>
+.top { position: absolute; left: 120px; right: 120px; top: 96px; display: flex; justify-content: space-between; align-items: center; }
+.hero { position: absolute; left: 120px; top: 250px; width: 1060px; }
+h1 { font-size: 142px; letter-spacing: -.045em; }
+.sub { margin-top: 44px; width: 900px; }
+.spec { position: absolute; right: 120px; top: 250px; width: 560px; }
+.spec .row { display: flex; align-items: center; justify-content: space-between; padding: 14px 30px; font-size: 22px; }
+.spec .row .n { display: flex; align-items: center; gap: 16px; font-family: var(--mono); font-size: 21px; color: #EDEDED; }
+.spec .modes { display: flex; gap: 6px; background: var(--ink-3); padding: 5px; border-radius: 10px; font-size: 18px; font-weight: 600; }
+.spec .modes span { padding: 6px 14px; border-radius: 7px; color: var(--dim-dark); }
+.spec .modes span.on { background: var(--paper); color: var(--ink); }
+.spec .sec { padding: 22px 32px 6px; font-family: var(--mono); font-size: 17px; letter-spacing: .08em; color: var(--dim-dark); text-transform: uppercase; }
+.spec .tree .row .n { font-family: var(--ui); font-size: 22px; }
+.ic { width: 22px; height: 22px; flex: none; }
+.strip { position: absolute; left: 120px; right: 120px; bottom: 96px; display: grid; grid-template-columns: repeat(4, 1fr); border-top: 2px solid var(--ink); }
+.strip > div { padding: 30px 0 0; }
+.strip .from { font-family: var(--mono); font-size: 20px; color: var(--dim); letter-spacing: .12em; }
+.strip .to { font-family: var(--display); font-size: 44px; font-weight: 700; letter-spacing: -.03em; margin-top: 8px; }
+.strip .to::before { content: "→ "; color: var(--ink); font-weight: 500; }
+</style></head><body>
+<div class="top">
+  <div class="brand"><img src="mark.svg" width="64" height="64"><b>Ferry</b></div>
+  <div class="label">Figma plugin · for Claude Design</div>
+</div>
+<div class="hero">
+  <h1>Your prototype,<br>rebuilt in <mark>Figma.</mark></h1>
+  <p class="sub">HTML and React exports land as <b>native layers</b>, with your tokens as <b>variables</b>.</p>
+</div>
+<div class="spec panel">
+  <div class="ph">Variables <div class="modes"><span class="on">Light</span><span>Dark</span></div></div>
+  <div class="row"><span class="n"><i class="sw" style="background:#1F6F43"></i>color/primary</span><span class="chip mint">green/700</span></div>
+  <div class="row"><span class="n"><i class="sw" style="background:#FAF8F3"></i>color/surface</span><span class="chip">#FAF8F3</span></div>
+  <div class="sec">Layers</div>
+  <div class="tree">
+    <div class="row"><span class="n"><svg class="ic" viewBox="0 0 24 24"><path d="M4 8h16M4 16h16M8 4v16M16 4v16" stroke="#B8FF65" stroke-width="2.2" fill="none"/></svg>Hero <span style="color:#8C8C8C">· auto layout</span></span></div>
+    <div class="row" style="padding-left:66px;padding-bottom:26px"><span class="n"><svg class="ic" viewBox="0 0 24 24"><path d="M12 3l9 9-9 9-9-9z" fill="none" stroke="#B8FF65" stroke-width="2.2"/></svg>Button <span style="color:#8C8C8C">· Default / Hover</span></span></div>
+  </div>
+</div>
+<div class="strip">
+  <div><div class="from">TOKEN</div><div class="to">Variable</div></div>
+  <div><div class="from">THEME</div><div class="to">Mode</div></div>
+  <div><div class="from">REPEAT</div><div class="to">Component</div></div>
+  <div><div class="from">:HOVER</div><div class="to">Variant</div></div>
+</div>
+</body></html>

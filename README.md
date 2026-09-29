@@ -176,8 +176,8 @@ Figma: **Plugins → Development → Import plugin from manifest…** and pick
 
 - [x] `manifest.json` carries the `id` Figma assigned on publish
       (`1686906820698118797`), so plugin updates map to the same listing.
-- [x] Community listing assets: 128x128 icon and 1920x960 cover in `branding/`
-      (`icon.png`, `cover.png`, rebuildable from `icon.html` / `cover.html`),
+- [x] Community listing assets in `branding/`: 128x128 icon, 1920x1080 cover and
+      three carousel images, rebuilt from `branding/src/` with `sh branding/render.sh`;
       tagline and description in `branding/LISTING.md`.
 - [x] Keep the non-affiliation line in the listing as well as in the UI. Carried
       in `branding/LISTING.md`.

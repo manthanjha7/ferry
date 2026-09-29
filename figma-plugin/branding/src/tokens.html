@@ -1,0 +1,27 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="brand.css">
+<style>.panel{flex:1.25} .gr{grid-template-columns: 1.3fr 1fr 1fr}</style></head><body>
+<div class="slide-top"><div class="brand"><img src="mark.svg" width="64" height="64"><b>Ferry</b></div><div class="label">01 · Tokens</div></div>
+<div class="slide-head"><h1>Tokens become <mark>real variables.</mark></h1>
+<p class="sub">Aliases stay intact. Light and dark themes become <b>native modes</b>.</p></div>
+<div class="stage">
+<div class="code"><span class="c">/* your design's CSS */</span>
+:root {
+  --green-700: #1F6F43;
+  <span class="p">--primary: var(--green-700);</span>
+  --surface: #FAF8F3;
+  --ink: #141414;
+}
+[data-theme="dark"] {
+  --surface: #121212;
+  --ink: #F2F0EB;
+}</div>
+<div class="arrow"><svg viewBox="0 0 72 72"><path d="M10 36h48M40 18l18 18-18 18" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+<div class="panel grid-rows">
+  <div class="ph">Variables <span class="chip">Tokens</span></div>
+  <div class="gr gh"><span>Name</span><span>Light</span><span>Dark</span></div>
+  <div class="gr"><span class="nm"><i class="sw" style="background:#1F6F43"></i>primary</span><span><span class="chip mint">green-700</span></span><span><span class="chip mint">green-700</span></span></div>
+  <div class="gr"><span class="nm"><i class="sw" style="background:#FAF8F3"></i>surface</span><span><span class="chip">#FAF8F3</span></span><span><span class="chip">#121212</span></span></div>
+  <div class="gr"><span class="nm"><i class="sw" style="background:#141414"></i>ink</span><span><span class="chip">#141414</span></span><span><span class="chip">#F2F0EB</span></span></div>
+  <div class="gr"><span class="nm"><i class="sw" style="background:#1F6F43"></i>green-700</span><span><span class="chip">#1F6F43</span></span><span><span class="chip">#1F6F43</span></span></div>
+</div>
+</div></body></html>

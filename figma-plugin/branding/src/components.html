@@ -1,0 +1,31 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="brand.css">
+<style>
+.code{flex:1}
+.set{flex:1.25; border:2px solid #D8D8D2; border-radius:26px; padding:34px 40px; position:relative; display:flex; flex-direction:column; gap:26px; justify-content:center}
+.set .tag{position:absolute; top:-20px; left:32px; background:var(--mint); padding:6px 14px; border-radius:8px; font-family:var(--mono); font-size:20px; color:var(--ink); font-weight:700}
+.var{display:flex; align-items:center; gap:28px}
+.var .k{font-family:var(--mono); font-size:21px; color:var(--dim); width:200px}
+.btn{font-family:var(--ui); font-weight:600; font-size:28px; width:260px; height:76px; display:inline-flex; align-items:center; justify-content:center; border-radius:14px; background:#1F6F43; color:#fff}
+.btn.h{background:#155233; box-shadow:0 10px 26px rgba(21,82,51,.35); transform:translateY(-3px)}
+.flow{display:flex; align-items:center; gap:14px; font-family:var(--mono); font-size:20px; color:var(--ink); background:var(--warm); border-radius:12px; padding:14px 20px; align-self:flex-start}
+.flow i{width:12px;height:12px;border-radius:50%;background:var(--ink);display:inline-block}
+</style></head><body>
+<div class="slide-top"><div class="brand"><img src="mark.svg" width="64" height="64"><b>Ferry</b></div><div class="label">02 · Components</div></div>
+<div class="slide-head"><h1>States become <mark>real variants.</mark></h1>
+<p class="sub">Repeated elements become <b>one main component</b> and its instances. Anything that changes on hover plays in your prototype.</p></div>
+<div class="stage">
+<div class="code"><span class="c">/* your design's CSS */</span>
+.button {
+  background: var(--primary);
+}
+<span class="p">.button:hover {</span>
+<span class="p">  background: var(--primary-dark);</span>
+<span class="p">  translate: 0 -3px;</span>
+<span class="p">}</span></div>
+<div class="arrow"><svg viewBox="0 0 72 72"><path d="M10 36h48M40 18l18 18-18 18" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+<div class="set"><span class="tag">◇ Button</span>
+  <div class="var"><span class="k">State=Default</span><span class="btn">Get started</span></div>
+  <div class="var"><span class="k">State=Hover</span><span class="btn h">Get started</span></div>
+  <div class="flow"><i></i>While hovering → Change to Hover · Smart animate</div>
+</div>
+</div></body></html>

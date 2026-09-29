@@ -3,16 +3,17 @@
 Everything needed to publish. Assets sit beside this file; copy is below.
 
 ## Assets
-- **Icon** — `icon.png` (128×128). Source: `icon.html`.
-- **Cover** — `cover.png` (1920×960). Source: `cover.html`.
-- Rebuild either after an edit:
-  ```bash
-  CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-  "$CHROME" --headless --force-device-scale-factor=1 --default-background-color=00000000 \
-    --window-size=128,128 --screenshot="$PWD/icon.png" "file://$PWD/icon.html"
-  "$CHROME" --headless --force-device-scale-factor=1 \
-    --window-size=1920,960 --screenshot="$PWD/cover.png" "file://$PWD/cover.html"
-  ```
+- **Icon**: `icon.png` (128×128). The mark is an F built from layer bars, the middle one in the signal colour.
+- **Cover**: `cover.png` (1920×1080).
+- **Carousel**, in this order after the cover:
+  1. `carousel-1-tokens.png`: tokens become variables, themes become modes.
+  2. `carousel-2-components.png`: components and hover variants.
+  3. `carousel-3-link.png`: sending a design from Claude Code.
+- **Sources** are in `src/`: `brand.css` (palette and type), `mark.svg`, and one HTML page per image. Rebuild everything with `sh render.sh`, or one image with `sh render.sh cover` (also `icon`, `tokens`, `components`, `link`).
+- **Brand**:
+  - Black `#0A0A0A` and white, with one signal colour, mint `#B8FF65`.
+  - Type: Inter Tight for headlines, Inter for body text, JetBrains Mono for labels (all from Google Fonts).
+  - No Claude or Figma marks.
 
 ## Name
 Ferry

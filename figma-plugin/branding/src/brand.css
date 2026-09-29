@@ -1,0 +1,58 @@
+/* Ferry brand system ("Manifest"): black and white, one signal colour.
+   Inter Tight for display, Inter for UI copy, JetBrains Mono for system labels. */
+@import url("https://fonts.googleapis.com/css2?family=Inter+Tight:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=block");
+:root {
+  --ink: #0A0A0A;
+  --ink-2: #161616;
+  --ink-3: #242424;
+  --paper: #FFFFFF;
+  --warm: #F2F0EB;
+  --line: #E4E1DA;
+  --dim: #6B6B6B;
+  --dim-dark: #8C8C8C;
+  --mint: #B8FF65;
+  --mint-ink: #2E5A00;
+  --display: "Inter Tight", "Inter", sans-serif;
+  --ui: "Inter", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; width: 1920px; height: 1080px; overflow: hidden; }
+body { background: var(--paper); color: var(--ink); font-family: var(--ui); -webkit-font-smoothing: antialiased; position: relative; }
+.label { font-family: var(--mono); font-size: 22px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); }
+.brand { display: flex; align-items: center; gap: 20px; }
+.brand svg { width: 64px; height: 64px; display: block; }
+.brand b { font-family: var(--display); font-weight: 700; font-size: 44px; letter-spacing: -.03em; }
+h1 { font-family: var(--display); font-weight: 800; letter-spacing: -.035em; line-height: .94; margin: 0; }
+mark { background: none; color: inherit; position: relative; z-index: 0; }
+mark::before { content: ""; position: absolute; left: -.04em; right: .02em; top: .56em; bottom: .04em; background: var(--mint); z-index: -1; }
+.sub { font-size: 34px; line-height: 1.35; color: #5F5F5F; letter-spacing: -.01em; margin: 0; }
+.sub b { color: var(--ink); font-weight: 600; }
+/* A panel that reads as a Figma sidebar without being Figma's UI. */
+.panel { background: var(--ink); color: #EDEDED; border-radius: 26px; font-family: var(--ui); overflow: hidden; }
+.panel .ph { display: flex; align-items: center; justify-content: space-between; padding: 26px 32px; border-bottom: 1.5px solid var(--ink-3); font-weight: 600; font-size: 24px; }
+.chip { display: inline-flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 20px; padding: 6px 14px; border-radius: 8px; background: var(--ink-3); color: #D8D8D8; }
+.chip.mint { background: var(--mint); color: var(--ink); font-weight: 700; }
+.sw { width: 26px; height: 26px; border-radius: 7px; flex: none; border: 1.5px solid rgba(255,255,255,.12); }
+
+/* Carousel slides */
+.slide-top { position: absolute; left: 120px; right: 120px; top: 96px; display: flex; justify-content: space-between; align-items: center; }
+.slide-head { position: absolute; left: 120px; top: 210px; width: 1500px; }
+.slide-head h1 { font-size: 104px; }
+.slide-head .sub { margin-top: 28px; font-size: 32px; width: 1180px; }
+.stage { position: absolute; left: 120px; right: 120px; bottom: 96px; top: 520px; display: flex; align-items: stretch; gap: 0; }
+.stage > .arrow { flex: none; width: 150px; display: flex; align-items: center; justify-content: center; }
+.stage > .arrow svg { width: 72px; height: 72px; }
+.code { background: var(--warm); border-radius: 26px; padding: 36px 40px; font-family: var(--mono); font-size: 25px; line-height: 1.75; color: var(--ink); white-space: pre; flex: 1; }
+.code .c { color: #9A968C; } .code .p { color: #2E5A00; font-weight: 700; } .code .k { color: #6B6B6B; }
+.panel .ph { font-size: 26px; }
+.grid-rows .gr { display: grid; align-items: center; padding: 16px 32px; border-bottom: 1.5px solid var(--ink-3); font-size: 22px; }
+.grid-rows .gr:last-child { border-bottom: 0; }
+.grid-rows .gh { color: var(--dim-dark); font-family: var(--mono); font-size: 17px; letter-spacing: .08em; text-transform: uppercase; padding-top: 18px; padding-bottom: 14px; }
+.nm { display: flex; align-items: center; gap: 16px; font-family: var(--mono); font-size: 22px; color: #EDEDED; }
+body.dark { background: var(--ink); color: #F5F5F5; }
+body.dark .sub { color: var(--dim-dark); }
+body.dark .sub b { color: #fff; }
+body.dark .label { color: var(--dim-dark); }
+body.dark .brand img { box-shadow: 0 0 0 1.5px #2A2A2A; border-radius: 14px; }
+.code { font-size: 24px; line-height: 1.7; }
