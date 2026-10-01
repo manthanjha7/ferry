@@ -2042,6 +2042,21 @@
             ]),
           JSON.stringify(stateDocs.map((d) => d.name)),
         );
+        // The variable collection is named after the system, and a system
+        // named after the document must not carry the first state's suffix:
+        // a real import came out as "Tidepool Landing · theme=light" holding
+        // the Dark mode too.
+        const namedDocs = await window.extractStateMatrix(
+          await (await fetch("states-named.dc.html")).text(),
+          "Named States",
+          { states: { props: ["theme"] } },
+        );
+        check(
+          "a state matrix names its design system after the document, not its first state",
+          namedDocs.length === 2 &&
+            namedDocs.every((d) => d.designSystem && d.designSystem.name === "Named States"),
+          JSON.stringify(namedDocs.map((d) => [d.name, d.designSystem?.name ?? null])),
+        );
         // The assertion that would have caught it on its own. Six frames whose
         // rendered content collapses to one picture is the exact failure, and
         // it is invisible to every count in the suite.

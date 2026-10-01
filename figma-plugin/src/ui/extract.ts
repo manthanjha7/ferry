@@ -1893,6 +1893,10 @@ export async function extractStateMatrix(
     doc.root.width = sized.width;
     doc.root.height = sized.height;
     doc.props = combo.values;
+    // A system named after the document is named after the document, not
+    // after its first state: the collection otherwise comes out called
+    // "Landing · theme=light" and holds the Dark mode too.
+    if (doc.designSystem && doc.designSystem.name === frameName) doc.designSystem.name = name;
 
     docs.push(doc);
   }

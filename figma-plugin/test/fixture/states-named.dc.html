@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet>
+        <!-- Tokens on :root, so the document has a design system to name. -->
+        <style>
+          :root { --sn-surface: #ffffff; }
+          :root[data-theme="dark"] { --sn-surface: #1e1e1e; }
+        </style>
+      </helmet>
+      <div data-name="Surface" style="width: 200px; height: 40px; background: var(--sn-surface)"></div>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{"$preview":{"width":200,"height":40},"theme":{"editor":"enum","options":["light","dark"],"default":"light","tsType":"string"}}'
+    >
+      class Component extends DCLogic {
+        renderVals() { return {}; }
+      }
+    </script>
+  </body>
+</html>
