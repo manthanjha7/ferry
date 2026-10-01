@@ -4560,6 +4560,7 @@ async function scenarioZ(ready: boolean): Promise<void> {
     `${p} the default changes to the hover variant while hovering, with Smart Animate`,
     `${p} the variant set sits in a components frame beside the import`,
     `${p} (mask) a CSS mask-image becomes an alpha mask under the frame's paint`,
+    `${p} the components frame takes the design's own background, so its mains stay legible`,
   ];
   if (!ready) {
     for (const n of names) skip(n, "captured/fixture-screen.json not found");
@@ -4595,6 +4596,9 @@ async function scenarioZ(ready: boolean): Promise<void> {
   check(names[4], hero?.children?.[0]?.name === "Mask" && hero.children[1]?.name === "Fill" && (hero.fills ?? []).length === 0 && hero.children[1].fills?.[0]?.type === "SOLID",
     JSON.stringify(hero && { kids: hero.children.map((c: any) => c.name), fills: hero.fills }));
   check(names[3], !!area && result.componentsArea!.parent?.type === "PAGE" && result.componentsArea!.x >= result.root.x + result.root.width, JSON.stringify(area && [area.name, result.componentsArea!.x, result.root.x + result.root.width]));
+  const rootFill = JSON.stringify(tree.fills);
+  check(names[5], (tree.fills ?? []).length > 0 && JSON.stringify(area?.fills) === rootFill,
+    JSON.stringify({ root: tree.fills, area: area?.fills }));
 }
 
 async function scenarioW(ready: boolean): Promise<void> {

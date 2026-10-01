@@ -159,6 +159,7 @@ export async function buildDocument(
     if (options.place !== false) placeBesideExistingContent(root);
     if (ctx.componentsArea) {
       ctx.componentsArea.name = `${doc.name} · components`;
+      await matchBackdrop(ctx.componentsArea, root);
       if (options.place !== false) placeAreas([root], [ctx.componentsArea]);
     }
   } catch (error) {
@@ -1244,6 +1245,28 @@ function asComponentNode(node: SceneNode): ComponentNode {
   wrap.counterAxisSizingMode = "AUTO";
   wrap.appendChild(node);
   return figma.createComponentFromNode(wrap);
+}
+
+/**
+ * The components frame takes the design's own background and variable modes.
+ * Its mains sit outside the design, so on a transparent frame they showed
+ * Figma's canvas behind them: dark text on a dark canvas, invisible, and a
+ * dark theme's components drawn in the light mode's colours.
+ */
+async function matchBackdrop(area: FrameNode, root: FrameNode): Promise<void> {
+  try {
+    if (Array.isArray(root.fills) && root.fills.length > 0) area.fills = JSON.parse(JSON.stringify(root.fills));
+  } catch {
+    // A fill Figma will not copy leaves the frame transparent, as before.
+  }
+  for (const [collectionId, modeId] of Object.entries(root.explicitVariableModes ?? {})) {
+    try {
+      const collection = await figma.variables.getVariableCollectionByIdAsync(collectionId);
+      if (collection) area.setExplicitVariableModeForCollection(collection, modeId);
+    } catch {
+      // A collection that cannot be read is one the frame cannot follow.
+    }
+  }
 }
 
 /** Components areas to the right of what was imported, one under another. */

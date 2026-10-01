@@ -999,6 +999,7 @@
       if (options.place !== false) placeBesideExistingContent(root);
       if (ctx.componentsArea) {
         ctx.componentsArea.name = `${doc.name} \xB7 components`;
+        await matchBackdrop(ctx.componentsArea, root);
         if (options.place !== false) placeAreas([root], [ctx.componentsArea]);
       }
     } catch (error) {
@@ -1582,6 +1583,20 @@
     wrap.counterAxisSizingMode = "AUTO";
     wrap.appendChild(node);
     return figma.createComponentFromNode(wrap);
+  }
+  async function matchBackdrop(area, root) {
+    var _a;
+    try {
+      if (Array.isArray(root.fills) && root.fills.length > 0) area.fills = JSON.parse(JSON.stringify(root.fills));
+    } catch (e) {
+    }
+    for (const [collectionId, modeId] of Object.entries((_a = root.explicitVariableModes) != null ? _a : {})) {
+      try {
+        const collection = await figma.variables.getVariableCollectionByIdAsync(collectionId);
+        if (collection) area.setExplicitVariableModeForCollection(collection, modeId);
+      } catch (e) {
+      }
+    }
   }
   function placeAreas(beside, areas) {
     if (areas.length === 0 || beside.length === 0) return;
