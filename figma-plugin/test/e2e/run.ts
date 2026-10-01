@@ -1249,8 +1249,18 @@ async function scenarioG(ready: boolean): Promise<void> {
 // Scenarios H-K — build a design system from the export (VariableTarget "build")
 // ---------------------------------------------------------------------------
 
-function hex(value: string): IRColor {
+/**
+ * A colour as the extractor writes it: exact doubles. Figma stores 32-bit
+ * floats, so what reads back is `hex()`, not this.
+ */
+function irHex(value: string): IRColor {
   const n = (i: number) => parseInt(value.slice(i, i + 2), 16) / 255;
+  return { r: n(1), g: n(3), b: n(5), a: 1 };
+}
+
+/** A colour as Figma reads it back: each channel a 32-bit float. */
+function hex(value: string): IRColor {
+  const n = (i: number) => Math.fround(parseInt(value.slice(i, i + 2), 16) / 255);
   return { r: n(1), g: n(3), b: n(5), a: 1 };
 }
 
@@ -1295,9 +1305,9 @@ function buildFixtureSystem(): IRDesignSystem {
         category: "color",
         kind: "COLOR",
         resolved: "#29AB87",
-        color: hex("#29AB87"),
+        color: irHex("#29AB87"),
         declaredIn: ["", EMAIL],
-        bySurface: { [EMAIL]: { resolved: "#1B6F58", color: hex("#1B6F58") } },
+        bySurface: { [EMAIL]: { resolved: "#1B6F58", color: irHex("#1B6F58") } },
       }),
       token({
         name: "acme-green-700",
@@ -1306,7 +1316,7 @@ function buildFixtureSystem(): IRDesignSystem {
         category: "color",
         kind: "COLOR",
         resolved: "#1B6F58",
-        color: hex("#1B6F58"),
+        color: irHex("#1B6F58"),
         declaredIn: [""],
       }),
       // `tokenPath`'s two-to-four-digit ramp floor strands a one-digit step, so
@@ -1318,7 +1328,7 @@ function buildFixtureSystem(): IRDesignSystem {
         category: "color",
         kind: "COLOR",
         resolved: "#FFFFFF",
-        color: hex("#FFFFFF"),
+        color: irHex("#FFFFFF"),
         declaredIn: [""],
       }),
       // Semantic, and it points somewhere else under the deck surface.
@@ -1329,11 +1339,11 @@ function buildFixtureSystem(): IRDesignSystem {
         category: "color",
         kind: "COLOR",
         resolved: "#29AB87",
-        color: hex("#29AB87"),
+        color: irHex("#29AB87"),
         aliasOf: "acme-green-500",
         declaredIn: ["", DECK],
         bySurface: {
-          [DECK]: { resolved: "#1B6F58", color: hex("#1B6F58"), aliasOf: "acme-green-700" },
+          [DECK]: { resolved: "#1B6F58", color: irHex("#1B6F58"), aliasOf: "acme-green-700" },
         },
       }),
       token({
@@ -1384,9 +1394,9 @@ function buildFixtureSystem(): IRDesignSystem {
         category: "color",
         kind: "COLOR",
         resolved: "#333333",
-        color: hex("#333333"),
+        color: irHex("#333333"),
         declaredIn: [DECK],
-        bySurface: { [DECK]: { resolved: "#333333", color: hex("#333333") } },
+        bySurface: { [DECK]: { resolved: "#333333", color: irHex("#333333") } },
       }),
       // Surface-shared: in both surfaces, in neither :root. Ungrouped, and the
       // base mode gets the first declaring surface's value.
@@ -1397,11 +1407,11 @@ function buildFixtureSystem(): IRDesignSystem {
         category: "color",
         kind: "COLOR",
         resolved: "#FFFFFF",
-        color: hex("#FFFFFF"),
+        color: irHex("#FFFFFF"),
         declaredIn: [DECK, EMAIL],
         bySurface: {
-          [DECK]: { resolved: "#FFFFFF", color: hex("#FFFFFF") },
-          [EMAIL]: { resolved: "#FAFAFA", color: hex("#FAFAFA") },
+          [DECK]: { resolved: "#FFFFFF", color: irHex("#FFFFFF") },
+          [EMAIL]: { resolved: "#FAFAFA", color: irHex("#FAFAFA") },
         },
       }),
     ],
@@ -1699,6 +1709,7 @@ async function scenarioJ(ready: boolean): Promise<void> {
     `${p} a renamed collection is still matched by its stamp`,
     `${p} a changed value is written in place, reported, and keeps the variable id`,
     `${p} an orphaned variable with no matching token is left alone`,
+    `${p} a first build reports no variable as changed, though Figma seeds a new variable's default mode`,
   ];
 
   if (!ready) {
@@ -1707,8 +1718,13 @@ async function scenarioJ(ready: boolean): Promise<void> {
   }
 
   const mock = freshMock();
-  await buildDocument(systemDoc(buildFixtureSystem()), BUILD_TARGET, () => {});
+  const initial = await buildDocument(systemDoc(buildFixtureSystem()), BUILD_TARGET, () => {});
   const first = builtVariables(mock);
+  check(
+    names[4],
+    initial.mapping.created > 0 && !initial.mapping.samples.some((s) => s.includes(" changed in ")),
+    `created=${initial.mapping.created} samples=${JSON.stringify(initial.mapping.samples)}`,
+  );
 
   // An orphan, i.e. a variable the designer added or one this export no longer
   // ships. Deleting it is destructive and the export may legitimately be a
@@ -1740,7 +1756,7 @@ async function scenarioJ(ready: boolean): Promise<void> {
   const edited = buildFixtureSystem();
   const green = edited.tokens.find((t) => t.name === "acme-green-700")!;
   green.resolved = "#0D4A3B";
-  green.color = hex("#0D4A3B");
+  green.color = irHex("#0D4A3B");
 
   const idBefore = after.byName.get("color/acme-green/700")?.id;
   const third = await buildDocument(systemDoc(edited), BUILD_TARGET, () => {});

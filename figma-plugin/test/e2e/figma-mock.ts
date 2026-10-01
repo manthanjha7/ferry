@@ -1138,7 +1138,18 @@ export function createFigmaMock(options: MockOptions = {}): FigmaMock {
         }
       }
 
-      this.valuesByMode[modeId] = value;
+      // Real Figma keeps colour channels and numbers as 32-bit floats, so what
+      // reads back is not what was written (250/255 comes back as
+      // 0.9803921580314636). A plugin comparing the two exactly sees a change
+      // on every re-import.
+      const f32 = (n: number) => Math.fround(n);
+      let stored: VariableValue = value;
+      if (typeof value === "number") stored = f32(value);
+      else if (value !== null && typeof value === "object" && "r" in (value as object)) {
+        const c = value as RGBA;
+        stored = { r: f32(c.r), g: f32(c.g), b: f32(c.b), a: f32(c.a ?? 1) };
+      }
+      this.valuesByMode[modeId] = stored;
     }
 
     remove(): void {
@@ -1203,6 +1214,17 @@ export function createFigmaMock(options: MockOptions = {}): FigmaMock {
         throw new Error(`createVariable: a variable named "${name}" already exists in collection "${collection.name}".`);
       }
       const variable = new VariableImpl(name, collection, resolvedType, false);
+      // Real Figma gives a new variable a value in the default mode straight
+      // away (white for a colour), so `valuesByMode` is never empty there. A
+      // plugin that reads "a value was there before" as "the designer set one"
+      // reports every new variable as changed (seen on a real import, 2 Oct).
+      const seed: Record<VariableResolvedDataType, VariableValue> = {
+        COLOR: { r: 1, g: 1, b: 1, a: 1 },
+        FLOAT: 0,
+        STRING: "",
+        BOOLEAN: false,
+      };
+      variable.valuesByMode[collection.defaultModeId] = seed[resolvedType];
       variablesById.set(variable.id, variable);
       collection.variableIds.push(variable.id);
       return variable;

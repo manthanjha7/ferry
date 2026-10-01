@@ -1785,12 +1785,16 @@ window.onmessage = (event: MessageEvent) => {
         );
       }
       if (mapping.created > 0) lines.push(`${mapping.created} new variables created`);
+      // A re-import in build mode updates the variables the first one made, so
+      // nothing is new and nothing is "mapped", yet every token is bound.
+      const updated = mapping.reused ?? 0;
+      if (updated > 0) lines.push(`${updated} existing variables updated`);
       const overflow = createOverflowNote(lastSentTarget, mapping.created);
       if (overflow) lines.push(overflow);
       if (mapping.unmatched > 0) {
         lines.push(`${mapping.unmatched} tokens left as literals (no match)`);
       }
-      if (bound === 0 && mapping.created === 0) {
+      if (bound === 0 && mapping.created === 0 && updated === 0) {
         lines.push("No design tokens bound — values imported as literals");
       }
       lines.push(...mapping.samples);

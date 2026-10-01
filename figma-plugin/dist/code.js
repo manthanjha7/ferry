@@ -550,10 +550,11 @@
     ];
     for (const token of ordered) {
       const type = buildTypeFor(token, target);
+      const fresh = !existing.has(buildPathOf(token));
       const variable = upsertVariable(buildPathOf(token), type, collection, existing, report);
       if (!variable) continue;
       variable.scopes = scopesFor(token, type);
-      if (!writeEveryMode(variable, token, type, modes, report)) continue;
+      if (!writeEveryMode(variable, token, type, modes, report, fresh)) continue;
       registry.byPath.set(token.path, variable);
       byName.set(token.name, variable);
     }
@@ -722,9 +723,9 @@
       return null;
     }
   }
-  function writeEveryMode(variable, token, type, modes, report) {
+  function writeEveryMode(variable, token, type, modes, report, fresh) {
     let wrote = false;
-    let reported = false;
+    let reported = fresh;
     for (const mode of modes) {
       const value = literalFor(token, mode.selector, type);
       if (value === null) continue;
@@ -908,8 +909,17 @@
     }
   }
   function sameValue(a, b) {
+    var _a, _b;
+    const close = (x, y, eps) => Math.abs(x - y) <= eps;
+    if (typeof a === "number" && typeof b === "number") return close(a, b, 1e-5 * Math.max(1, Math.abs(b)));
     if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) {
       return a === b;
+    }
+    if ("r" in a && "r" in b) {
+      const ca = a;
+      const cb = b;
+      const eps = 0.5 / 255;
+      return close(ca.r, cb.r, eps) && close(ca.g, cb.g, eps) && close(ca.b, cb.b, eps) && close((_a = ca.a) != null ? _a : 1, (_b = cb.a) != null ? _b : 1, 1e-3);
     }
     return JSON.stringify(a) === JSON.stringify(b);
   }

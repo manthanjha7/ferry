@@ -836,11 +836,12 @@ export async function buildDesignSystem(
 
   for (const token of ordered) {
     const type = buildTypeFor(token, target)!;
+    const fresh = !existing.has(buildPathOf(token));
     const variable = upsertVariable(buildPathOf(token), type, collection, existing, report);
     if (!variable) continue;
 
     variable.scopes = scopesFor(token, type) as VariableScope[];
-    if (!writeEveryMode(variable, token, type, modes, report)) continue;
+    if (!writeEveryMode(variable, token, type, modes, report, fresh)) continue;
 
     registry.byPath.set(token.path, variable);
     byName.set(token.name, variable);
@@ -1202,7 +1203,8 @@ function upsertVariable(
  * again, the file follows — but it is still an edit to a file someone may have
  * hand-tuned, so a changed value is named rather than silently applied.
  * Returns false when the token has no representable value at all, so the caller
- * can keep it out of the alias pass.
+ * can keep it out of the alias pass. `fresh` marks a variable created by this
+ * import, which is never reported.
  */
 function writeEveryMode(
   variable: Variable,
@@ -1210,9 +1212,13 @@ function writeEveryMode(
   type: VariableResolvedDataType,
   modes: BuiltMode[],
   report: MappingReport,
+  fresh: boolean,
 ): boolean {
   let wrote = false;
-  let reported = false;
+  // A variable this import just created has nothing of the designer's to
+  // change. Figma still gives it a placeholder value in the default mode, so
+  // comparing against that would report every new variable as changed.
+  let reported = fresh;
 
   for (const mode of modes) {
     const value = literalFor(token, mode.selector, type);
@@ -1546,9 +1552,23 @@ function writePluginData(
   }
 }
 
+/**
+ * Whether a stored value is the one about to be written. Figma keeps numbers
+ * and colour channels as 32-bit floats, so 250/255 reads back as
+ * 0.9803921580314636: compared exactly, every colour "changed" on every
+ * re-import. Colours match within half a step of 8-bit colour.
+ */
 function sameValue(a: VariableValue, b: VariableValue): boolean {
+  const close = (x: number, y: number, eps: number) => Math.abs(x - y) <= eps;
+  if (typeof a === "number" && typeof b === "number") return close(a, b, 1e-5 * Math.max(1, Math.abs(b)));
   if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) {
     return a === b;
+  }
+  if ("r" in a && "r" in b) {
+    const ca = a as RGBA;
+    const cb = b as RGBA;
+    const eps = 0.5 / 255;
+    return close(ca.r, cb.r, eps) && close(ca.g, cb.g, eps) && close(ca.b, cb.b, eps) && close(ca.a ?? 1, cb.a ?? 1, 1e-3);
   }
   return JSON.stringify(a) === JSON.stringify(b);
 }
