@@ -1,46 +1,62 @@
-# Ferry — Figma Community listing
+# Ferry: Figma Community listing
 
 Everything needed to publish. Assets sit beside this file; copy is below.
 
 ## Assets
-- **Icon**: `icon.png` (128×128). The mark is an F built from layer bars, the middle one in the signal colour.
-- **Cover**: `cover.png` (1920×1080).
-- **Carousel**, in this order after the cover:
-  1. `carousel-1-tokens.png`: tokens become variables, themes become modes.
-  2. `carousel-2-components.png`: components and hover variants.
-  3. `carousel-3-link.png`: sending a design from Claude Code.
-- **Sources** are in `src/`: `brand.css` (palette and type), `mark.svg`, and one HTML page per image. Rebuild everything with `sh render.sh`, or one image with `sh render.sh cover` (also `icon`, `tokens`, `components`, `link`).
-- **Brand**:
-  - Black `#0A0A0A` and white, with one signal colour, mint `#B8FF65`.
-  - Type: Inter Tight for headlines, Inter for body text, JetBrains Mono for labels (all from Google Fonts).
-  - No Claude or Figma marks.
+Every image is a real capture from Figma: a demo design (Tidepool, a scheduling page with a light and a dark theme, built in Claude Design's format) imported with Ferry. Nothing is mocked up.
+- **Icon**: `icon.png` (128×128). An F built from layer bars.
+- **Thumbnail**: `cover.png` (1920×1080).
+- **Carousel**, in this order:
+  1. `carousel-1-import.mp4`: the import, start to finish (20 s, recorded in Figma).
+  2. `carousel-2-tokens.png`: Figma's Variables table, Light and Dark modes, aliases intact.
+  3. `carousel-3-variants.png`: a hover variant with its prototype interaction.
+  4. `carousel-4-layout.png`: auto layout and bound variables on an imported card.
+  5. `carousel-5-link.png`: a design sent from Claude Code, waiting in the panel.
+- **GIF** for the README: `ferry-import.gif` (the carousel takes MP4, not GIF).
+- **Sources** are in `src/`: one HTML page per image, `listing.css`, `mark.svg`, and the raw captures in `src/shots/`. Rebuild with `sh render.sh`.
 
-## Name
-Ferry
+## Name (the listing title)
+Ferry: Claude Design to Figma (Variables, Modes, Auto Layout)
 
-## Tagline (one line, shown under the name)
-Bring Claude Design screens into Figma as editable layers, with your own tokens and themes intact.
+The plugin itself stays named **Ferry** in `manifest.json`. The title follows the pattern the most-used import plugins use: name, colon, the job, specifics in brackets.
+
+## Tagline (100 characters, shown under the name)
+Turn Claude Design exports into editable Figma layers, with tokens as variables and themes as modes.
 
 ## Description
-Drop a Claude Design export into Ferry and it lands in Figma as native layers you can edit: real auto-layout where the design had it, text as text, and frames named the way the design named them. One screen or a whole project in a single import. Designs built as React prototypes (Tailwind and all) and Claude Design animations come across too, animations as one frame per scene wired to play.
+Ferry imports Claude Design exports into Figma as native, editable layers. Not a screenshot: real frames, real auto layout and real text, named the way the design named them.
 
-When the design uses a design system, Ferry keeps it. Your tokens arrive as Figma **variables** under their own names (`--primary` stays an alias of `--green-700`, not a hex it guessed), and a light/dark theme becomes a pair of variable **modes** you can switch on any frame. Repeated elements become **components**, and anything that changes on hover gets a **Default/Hover variant** that plays in your prototype. A document's declared states come in as frames wired into a clickable prototype.
+How to use
+1. In Claude Design, export your project as a .zip, or a single .html file.
+2. Run Ferry in Figma and drop the file in.
+3. Click Import.
 
-**No download needed if you use Claude Code:** install Ferry Link (two lines, shown in the panel) and tell Claude "send my Portfolio to Figma". The design appears in Ferry, ready to import.
+What you get
+- Design tokens become Figma variables, under their own names. Aliases stay aliases: primary still points at green-700.
+- A light and a dark theme become variable modes, with one frame per theme.
+- Repeated elements become components, with instances in the design.
+- Hover states become Default and Hover variants, wired to play in your prototype.
+- React prototypes (Tailwind included) and Claude Design animations come across too.
 
-It runs locally: no server, no account. Ferry loads only what a design itself uses from the web: its Google Fonts, and Tailwind for designs built with it. Your files never leave your machine.
+Send it from Claude Code (optional)
+Install the free Ferry Link companion in Claude Code, then say "send my Portfolio to Figma". The design appears in Ferry, ready to import. Setup is two lines, shown in the panel.
 
-What it does not do yet: bind text to text styles, or load images a design links from other websites. Those arrive as plain layers, or are left out with a note.
+Privacy
+Ferry runs on your computer. No account, no server, no tracking. It loads only what a design itself uses from the web: its Google Fonts, and Tailwind for designs built with it.
 
-*Not affiliated with Anthropic or Figma. "Claude Design" is used only to describe what this imports.*
+Known limits
+Text is not yet bound to text styles. Images a design links from other websites are left out, with a note.
+
+Free and open source: github.com/manthanjha7/ferry
+Questions and bugs: github.com/manthanjha7/ferry/issues
+
+Not affiliated with Anthropic or Figma. "Claude Design" is used only to describe what Ferry imports.
 
 ## Tags
 claude design, html to figma, import, design system, variables, design tokens, variable modes, dark mode, auto layout, components, prototype
 
 ## Notes for the publish flow
-- The listing title can carry the descriptive phrase for discoverability, e.g.
-  **"Ferry — Claude Design to Figma, with your tokens"**, while the plugin name in
-  `manifest.json` stays **Ferry**.
+- No em dashes anywhere in the public copy.
 - Keep the non-affiliation line in the description (above). It is the reason a
   "Claude Design" reference in the title is safe nominative use rather than an
   implied endorsement.

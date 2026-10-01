@@ -1,10 +1,13 @@
 # Ferry
 
 A Figma plugin that imports Claude Design screens as editable layers, with your
-design tokens mapped onto **your existing Figma variables** rather than baked in
-as hex literals.
+design tokens as **Figma variables** (mapped onto your existing ones, or built
+from the export) rather than baked in as hex literals, and light/dark themes as
+variable modes.
 
-Runs locally inside Figma. No server, no account. Its only network access is the Google Fonts a design links, so text is measured in its real font; nothing about the design leaves your machine.
+![Ferry importing a Claude Design export into Figma](figma-plugin/branding/ferry-import.gif)
+
+Runs locally inside Figma. No server, no account. It loads only what a design itself uses from the web: its Google Fonts, and Tailwind for designs built with it. Nothing about the design leaves your machine.
 
 > Not affiliated with Anthropic or Figma. "Claude Design" is used only to
 > describe what this imports.
@@ -176,9 +179,10 @@ Figma: **Plugins → Development → Import plugin from manifest…** and pick
 
 - [x] `manifest.json` carries the `id` Figma assigned on publish
       (`1686906820698118797`), so plugin updates map to the same listing.
-- [x] Community listing assets in `branding/`: 128x128 icon, 1920x1080 cover and
-      three carousel images, rebuilt from `branding/src/` with `sh branding/render.sh`;
-      tagline and description in `branding/LISTING.md`.
+- [x] Community listing assets in `branding/`: 128x128 icon, 1920x1080 cover, a
+      20-second import video and four carousel images, all real Figma captures,
+      rebuilt from `branding/src/` with `sh branding/render.sh`; title, tagline and
+      description in `branding/LISTING.md`.
 - [x] Keep the non-affiliation line in the listing as well as in the UI. Carried
       in `branding/LISTING.md`.
 - [x] `networkAccess` allows `fonts.googleapis.com` and `fonts.gstatic.com` only, with the reason stated. Measured in a real Figma panel: under `none`, a design's Google Fonts never load, so its text was measured in a fallback face and re-wrapped in Figma.

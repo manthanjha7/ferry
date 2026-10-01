@@ -1,0 +1,17 @@
+/* Listing images: real Figma captures under one plain headline each. */
+@import url("https://fonts.googleapis.com/css2?family=Inter+Tight:wght@500;600;700&family=Inter:wght@400;500&display=block");
+* { box-sizing: border-box; }
+html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; }
+body { background: #F1EFEA; color: #111; font-family: Inter, sans-serif; -webkit-font-smoothing: antialiased; position: relative; }
+body.dark { background: #0E0E0E; color: #F2F2F2; }
+.brand { position: absolute; left: 120px; top: 84px; display: flex; align-items: center; gap: 14px; font-family: "Inter Tight"; font-weight: 600; font-size: 30px; letter-spacing: -.01em; }
+.brand img { width: 40px; height: 40px; display: block; }
+h1 { font-family: "Inter Tight"; font-weight: 600; letter-spacing: -.03em; line-height: 1.02; margin: 0; }
+.sub { font-size: 30px; line-height: 1.4; color: #5E5C57; margin: 0; letter-spacing: -.005em; }
+body.dark .sub { color: #9A9A9A; }
+.shot { position: absolute; border-radius: 18px; overflow: hidden; box-shadow: 0 0 0 1px rgba(0,0,0,.10), 0 30px 80px rgba(20,18,12,.22); background: #2C2C2C; }
+body.dark .shot { box-shadow: 0 0 0 1px rgba(255,255,255,.10), 0 30px 80px rgba(0,0,0,.6); }
+.shot img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.say { display: inline-flex; align-items: center; gap: 14px; margin-top: 34px; padding: 18px 26px; border-radius: 14px; background: #1A1A1A; color: #F2F2F2; font-family: "Inter Tight"; font-size: 30px; font-weight: 500; letter-spacing: -.01em; }
+body.dark .say { background: #1C1C1C; box-shadow: 0 0 0 1px rgba(255,255,255,.12); }
+.say .p { color: #B8FF65; font-family: ui-monospace, Menlo, monospace; font-size: 26px; }

@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Instrument+Serif&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --sand-50: rgb(250,248,244); --sand-100: rgb(243,240,233); --sand-200: rgb(229,225,215);
+    --stone-500: rgb(112,108,99); --stone-800: rgb(44,42,38); --stone-900: rgb(28,27,24);
+    --tide-500: rgb(38,110,103); --tide-600: rgb(27,90,84); --tide-200: rgb(176,214,207);
+    --night-900: rgb(19,22,22); --night-800: rgb(29,33,33); --night-700: rgb(42,47,47);
+    --bg: var(--sand-50); --surface: rgb(255,255,255); --subtle: var(--sand-100);
+    --text: var(--stone-900); --muted: var(--stone-500); --border: var(--sand-200);
+    --accent: var(--tide-500); --accent-hover: var(--tide-600); --on-accent: rgb(255,255,255);
+  }
+  :root[data-theme="dark"] {
+    --bg: var(--night-900); --surface: var(--night-800); --subtle: var(--night-700);
+    --text: var(--sand-50); --muted: rgb(160,166,163); --border: var(--night-700);
+    --accent: var(--tide-200); --accent-hover: rgb(206,233,228); --on-accent: var(--night-900);
+  }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: Geist, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  a { color: var(--text); text-decoration: none; }
+  a:hover { color: var(--accent-hover); }
+  .serif { font-family: "Instrument Serif", Georgia, serif; font-weight: 400; }
+  .muted { color: var(--muted); }
+  .btn { display: flex; align-items: center; justify-content: center; height: 44px; padding: 0 20px; border-radius: 10px; font-size: 15px; font-weight: 500; cursor: pointer; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; }
+</style>
+</helmet>
+<div data-name="Page" data-screen-label="Landing" style="background:var(--bg);display:flex;flex-direction:column;align-items:center;padding:0 0 96px">
+  <div data-name="Nav" style="width:100%;max-width:1200px;display:flex;align-items:center;justify-content:space-between;padding:24px 40px;box-sizing:border-box">
+    <div data-name="Logo" style="display:flex;align-items:center;gap:10px">
+      <div style="width:22px;height:22px;border-radius:50%;background:var(--accent)"></div>
+      <span style="font-size:18px;font-weight:600;letter-spacing:-0.01em">Tidepool</span>
+    </div>
+    <div data-name="Links" style="display:flex;align-items:center;gap:32px;font-size:15px">
+      <a href="#" style="color:var(--muted)" style-hover="color:var(--text)">Product</a>
+      <a href="#" style="color:var(--muted)" style-hover="color:var(--text)">Pricing</a>
+      <a href="#" style="color:var(--muted)" style-hover="color:var(--text)">Changelog</a>
+    </div>
+    <div data-name="Actions" style="display:flex;align-items:center;gap:12px">
+      <a href="#" style="font-size:15px;color:var(--text);padding:0 12px">Sign in</a>
+      <div data-name="Button" class="btn" style="background:var(--accent);color:var(--on-accent)" style-hover="background:var(--accent-hover)">Start free</div>
+    </div>
+  </div>
+
+  <div data-name="Hero" style="width:100%;max-width:1200px;display:flex;gap:64px;align-items:center;padding:72px 40px 80px;box-sizing:border-box">
+    <div data-name="Copy" style="flex:1;display:flex;flex-direction:column;gap:24px">
+      <span style="font-size:14px;font-weight:500;color:var(--accent)">Scheduling for small studios</span>
+      <h1 class="serif" style="margin:0;font-size:76px;line-height:1.02;letter-spacing:-0.01em">Clients book.<br>You keep working.</h1>
+      <p class="muted" style="margin:0;font-size:19px;line-height:1.55;max-width:460px">One link with your real availability. No back and forth, no double bookings, no reminder emails to write.</p>
+      <div data-name="Buttons" style="display:flex;gap:12px;margin-top:8px">
+        <div data-name="Button" class="btn" style="background:var(--accent);color:var(--on-accent)" style-hover="background:var(--accent-hover)">Start free</div>
+        <div data-name="Button secondary" class="btn" style="background:var(--surface);color:var(--text);border:1px solid var(--border)" style-hover="background:var(--subtle)">See a booking page</div>
+      </div>
+    </div>
+
+    <div data-name="Booking card" class="card" style="width:440px;padding:28px;display:flex;flex-direction:column;gap:22px;box-shadow:0 1px 2px rgba(0,0,0,.04),0 12px 32px rgba(0,0,0,.06)">
+      <div style="display:flex;align-items:center;gap:14px">
+        <div style="width:44px;height:44px;border-radius:50%;background:var(--subtle)"></div>
+        <div style="display:flex;flex-direction:column;gap:2px">
+          <span style="font-size:16px;font-weight:600">Portrait session</span>
+          <span class="muted" style="font-size:14px">60 min · Maya's Studio</span>
+        </div>
+      </div>
+      <div data-name="Days" style="display:flex;gap:8px">
+        <sc-for list="{{ days }}" as="d">
+          <div data-name="Day" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:10px 0;border-radius:10px;border:1px solid {{ d.border }};background:{{ d.bg }};color:{{ d.fg }}">
+            <span style="font-size:12px">{{ d.name }}</span>
+            <span style="font-size:17px;font-weight:600">{{ d.num }}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div data-name="Times" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+        <sc-for list="{{ times }}" as="t">
+          <div data-name="Time" style="display:flex;align-items:center;justify-content:center;height:42px;border-radius:10px;border:1px solid var(--border);font-size:15px;font-weight:500" style-hover="border-color:var(--accent);color:var(--accent)">{{ t }}</div>
+        </sc-for>
+      </div>
+      <div data-name="Button" class="btn" style="background:var(--accent);color:var(--on-accent)" style-hover="background:var(--accent-hover)">Book Thursday, 10:30</div>
+    </div>
+  </div>
+
+  <div data-name="Features" style="width:100%;max-width:1200px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;padding:0 40px;box-sizing:border-box">
+    <sc-for list="{{ features }}" as="f">
+      <div data-name="Feature" class="card" style="padding:28px;display:flex;flex-direction:column;gap:10px">
+        <span style="font-size:13px;font-weight:500;color:var(--accent)">{{ f.kicker }}</span>
+        <span style="font-size:20px;font-weight:600;letter-spacing:-0.01em">{{ f.title }}</span>
+        <span class="muted" style="font-size:15px;line-height:1.55">{{ f.body }}</span>
+      </div>
+    </sc-for>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;light&quot;,&quot;options&quot;:[&quot;light&quot;,&quot;dark&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Theme&quot;}}">
+class Component extends DCLogic {
+  componentDidMount() { this.apply(); }
+  componentDidUpdate() { this.apply(); }
+  apply() { document.documentElement.setAttribute("data-theme", this.props.theme === "dark" ? "dark" : "light"); }
+  renderVals() {
+    const days = [["Mon", 12], ["Tue", 13], ["Wed", 14], ["Thu", 15], ["Fri", 16]].map(([name, num]) => {
+      const on = name === "Thu";
+      return { name, num, bg: on ? "var(--accent)" : "var(--surface)", fg: on ? "var(--on-accent)" : "var(--text)", border: on ? "var(--accent)" : "var(--border)" };
+    });
+    return {
+      days,
+      times: ["9:00", "10:30", "12:00", "14:00", "15:30", "17:00"],
+      features: [
+        { kicker: "Availability", title: "Your calendar, not a form", body: "Tidepool reads the calendars you already use and only offers times you are actually free." },
+        { kicker: "Payments", title: "Deposits at booking", body: "Take a deposit when a client books, so a no-show still pays for the hour you held." },
+        { kicker: "Reminders", title: "Nobody forgets", body: "A text the day before and an email an hour before, written in your voice, sent for you." }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>
