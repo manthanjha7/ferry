@@ -2209,16 +2209,31 @@ async function scenarioM(ready: boolean): Promise<void> {
     `${p} the overflow hint fires only where mode (a) actually overflowed`,
     `${p} every place that changes what is loaded re-derives the mode`,
     `${p} Build asks for a real library, not a flat collection`,
+    `${p} a document that declares its own tokens builds them by default in a file with none`,
   ];
 
   const facts = (over: Partial<TokenModeFacts>): TokenModeFacts => ({
     collections: 0,
     exportTokenFiles: 0,
     savedTokenFiles: 0,
+    documentTokens: 0,
     exportAlreadySaved: false,
     loaded: false,
     ...over,
   });
+
+  // Most Claude Design pages declare their tokens inline, with no _ds folder.
+  // Defaulting those to None imported a tokenised design as literals and said
+  // "No design tokens bound", the opposite of what Ferry is for.
+  check(
+    names[7],
+    defaultTokenMode(facts({ documentTokens: 21, loaded: true })) === "build" &&
+      defaultTokenMode(facts({ documentTokens: 21, collections: 1, loaded: true })) === "map" &&
+      defaultTokenMode(facts({ documentTokens: 0, loaded: true })) === "none",
+    `${defaultTokenMode(facts({ documentTokens: 21, loaded: true }))}/` +
+      `${defaultTokenMode(facts({ documentTokens: 21, collections: 1, loaded: true }))}/` +
+      `${defaultTokenMode(facts({ documentTokens: 0, loaded: true }))}`,
+  );
 
   // The user's own sentence, in the three states it describes: I have a design
   // system, I do not but the export does, I have neither.

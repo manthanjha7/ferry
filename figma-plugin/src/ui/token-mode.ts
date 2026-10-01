@@ -41,6 +41,12 @@ export type TokenModeFacts = {
   exportTokenFiles: number;
   /** Token CSS the user added by hand, persisted across sessions. */
   savedTokenFiles: number;
+  /**
+   * Custom properties the dropped pages declare themselves. Claude Design
+   * usually inlines its tokens rather than shipping a _ds folder, so this is
+   * the common way an export carries a design system.
+   */
+  documentTokens: number;
   /** The export's token CSS is already what is saved, so there is nothing to offer. */
   exportAlreadySaved: boolean;
   /** Anything at all to import: a drop, or pasted markup. */
@@ -92,7 +98,10 @@ export function tokenModeAvailability(facts: TokenModeFacts): TokenModeAvailabil
 export function defaultTokenMode(facts: TokenModeFacts): TokenMode {
   const available = tokenModeAvailability(facts);
   if (available.map === null) return "map";
-  if (available.build === null && (facts.exportTokenFiles > 0 || facts.savedTokenFiles > 0)) {
+  if (
+    available.build === null &&
+    (facts.exportTokenFiles > 0 || facts.savedTokenFiles > 0 || facts.documentTokens > 0)
+  ) {
     return "build";
   }
   return "none";

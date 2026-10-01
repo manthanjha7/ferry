@@ -159,6 +159,8 @@ let pendingModuleSources: Record<string, string> | undefined;
  * silently replaced by whatever a dropped export happened to ship.
  */
 let pendingDsTokenCss: { css: string; fileCount: number } = { css: "", fileCount: 0 };
+/** Custom properties the loaded pages declare themselves (see `TokenModeFacts.documentTokens`). */
+let pendingDocumentTokens = 0;
 let pendingDsManifest: string | undefined;
 
 /**
@@ -174,6 +176,7 @@ function clearPendingSources(): void {
   pendingModuleSources = undefined;
   pendingDsTokenCss = { css: "", fileCount: 0 };
   pendingDsManifest = undefined;
+  pendingDocumentTokens = 0;
 }
 let targets: TargetSummary = { local: [], libraries: [] };
 let designSystemCss = "";
@@ -411,6 +414,7 @@ async function acceptFileSet(files: File[], preferPage?: string): Promise<void> 
   pendingModuleSources = await collectModuleSources(assets);
   pendingDsTokenCss = await collectDsTokenCss(files);
   pendingDsManifest = await collectDesignSystemManifest(files);
+  pendingDocumentTokens = await declaredTokenCount(screens);
 
   renderScreenPicker();
   previewSelection();
@@ -692,6 +696,7 @@ pasteArea.addEventListener("input", () => {
   // Pasted markup has no sibling files, so anything kept around from a
   // previous drop no longer applies to what's about to be imported.
   clearPendingSources();
+  pendingDocumentTokens = countDeclaredTokens(value);
   pageRow.style.display = "none";
   setStatus("idle", value ? "Ready to import pasted markup." : "");
   // States call site 3 of 3. Pasted markup carries a `data-props` schema as
@@ -1909,11 +1914,33 @@ function renderTargets(): void {
  * cached: both halves of it arrive asynchronously and at different moments
  * (see `TokenModeFacts`, src/ui/token-mode.ts).
  */
+/**
+ * How many custom properties a page declares (`--name: value`). A cheap read
+ * of the markup at drop time, before anything is measured: enough to know the
+ * export carries tokens, so Build can be the default.
+ */
+function countDeclaredTokens(html: string): number {
+  return (html.match(/(^|[{;\s])--[A-Za-z][\w-]*\s*:/g) ?? []).length;
+}
+
+async function declaredTokenCount(screens: Screen[]): Promise<number> {
+  let total = 0;
+  for (const screen of screens) {
+    try {
+      total += countDeclaredTokens(screen.html ?? (screen.file ? await screen.file.text() : ""));
+    } catch {
+      // An unreadable page declares nothing we can count.
+    }
+  }
+  return total;
+}
+
 function tokenModeFacts(): TokenModeFacts {
   return {
     collections: targets.local.length + targets.libraries.length,
     exportTokenFiles: pendingDsTokenCss.fileCount,
     savedTokenFiles: dsFileCount,
+    documentTokens: pendingDocumentTokens,
     exportAlreadySaved:
       pendingDsTokenCss.css.length > 0 && designSystemCss === pendingDsTokenCss.css,
     loaded: pendingScreens.length > 0,
